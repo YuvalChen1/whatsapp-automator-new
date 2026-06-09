@@ -7,6 +7,7 @@ const qrcodeTerminal = require('qrcode-terminal');
 const cron = require('node-cron');
 const fs = require('fs');
 const path = require('path');
+const ExcelJS = require('exceljs');
 
 const app = express();
 const server = http.createServer(app);
@@ -15,6 +16,7 @@ const io = new Server(server);
 const PORT = process.env.PORT || 3000;
 const SCHEDULE_FILE = path.join(__dirname, 'schedule.json');
 const CHATBOT_FILE = path.join(__dirname, 'chatbot_rules.json');
+const REPLIES_FILE = path.join(__dirname, 'replies.json');
 
 // Serve static UI assets
 app.use(express.static(path.join(__dirname, 'public')));
@@ -40,6 +42,9 @@ let chatbotConfig = {
     rules: []
 };
 
+// Replies tracking data: { "YYYY-MM": { "DD": [ { phone, message, time } ] } }
+let repliesData = {};
+
 // Load existing configs
 if (fs.existsSync(SCHEDULE_FILE)) {
     try {
@@ -59,6 +64,43 @@ if (fs.existsSync(CHATBOT_FILE)) {
     } catch (e) {
         console.error('Error reading chatbot_rules.json:', e.message);
     }
+}
+
+if (fs.existsSync(REPLIES_FILE)) {
+    try {
+        const raw = fs.readFileSync(REPLIES_FILE, 'utf8');
+        repliesData = JSON.parse(raw);
+        console.log('Loaded replies tracking data.');
+    } catch (e) {
+        console.error('Error reading replies.json:', e.message);
+    }
+}
+
+// Helper: log every incoming reply to repliesData and persist
+function logReply(phone, messageText) {
+    const now = new Date();
+    const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const dayKey = String(now.getDate()).padStart(2, '0');
+    const timeStr = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+
+    if (!repliesData[monthKey]) repliesData[monthKey] = {};
+    if (!repliesData[monthKey][dayKey]) repliesData[monthKey][dayKey] = [];
+
+    repliesData[monthKey][dayKey].push({
+        phone,
+        message: messageText,
+        time: timeStr
+    });
+
+    // Persist to disk
+    try {
+        fs.writeFileSync(REPLIES_FILE, JSON.stringify(repliesData, null, 2));
+    } catch (err) {
+        console.error('Failed to save replies.json:', err.message);
+    }
+
+    // Notify dashboard in real-time
+    io.emit('new_reply', { phone, message: messageText, time: timeStr, day: dayKey, month: monthKey });
 }
 
 // Initialize WhatsApp client
@@ -120,16 +162,20 @@ client.on('disconnected', (reason) => {
     io.emit('disconnected');
 });
 
-// Incoming message listener (for Chatbot Auto-Replies)
+// Incoming message listener (for Chatbot Auto-Replies & Reply Tracking)
 client.on('message', async (msg) => {
-    // Check if chatbot is enabled
-    if (!chatbotConfig.enabled) return;
-
     // Ignore group chats
     if (msg.from.endsWith('@g.us')) return;
 
+    const phone = msg.from.split('@')[0];
     const incomingText = msg.body.trim().toLowerCase();
     console.log(`Received message from ${msg.from}: "${msg.body}"`);
+
+    // --- Log every incoming reply for the Excel report ---
+    logReply(phone, msg.body.trim());
+
+    // Check if chatbot is enabled before processing rules
+    if (!chatbotConfig.enabled) return;
 
     // Scan through our triggers
     for (const rule of chatbotConfig.rules) {
@@ -145,8 +191,7 @@ client.on('message', async (msg) => {
                 // Reply directly (quotes their message)
                 await msg.reply(rule.reply);
 
-                // Format contact phone number for display
-                const phone = msg.from.split('@')[0];
+                // Phone was already extracted above
                 
                 // Stream log to Dashboard
                 io.emit('automation_log', { 
@@ -166,6 +211,188 @@ client.on('message', async (msg) => {
 });
 
 client.initialize();
+
+// ============================================================
+//  Express route: Download monthly Excel report
+// ============================================================
+app.get('/download-report', async (req, res) => {
+    try {
+        // Determine which month to export (default: current)
+        const now = new Date();
+        const requestedMonth = req.query.month; // format "YYYY-MM"
+        const monthKey = requestedMonth || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
+        const [yearStr, monStr] = monthKey.split('-');
+        const year = parseInt(yearStr, 10);
+        const month = parseInt(monStr, 10);
+        const daysInMonth = new Date(year, month, 0).getDate();
+
+        const monthData = repliesData[monthKey] || {};
+
+        // Collect unique phone numbers for this month
+        const phoneSet = new Set();
+        for (const dayKey in monthData) {
+            for (const entry of monthData[dayKey]) {
+                phoneSet.add(entry.phone);
+            }
+        }
+        const phones = Array.from(phoneSet).sort();
+
+        // Build the Excel workbook
+        const workbook = new ExcelJS.Workbook();
+        workbook.creator = 'WhatsApp Automator';
+
+        const monthNames = ['January','February','March','April','May','June',
+                            'July','August','September','October','November','December'];
+        const sheetName = `${monthNames[month - 1]} ${year}`;
+        const worksheet = workbook.addWorksheet(sheetName);
+
+        // ---- Header row: Day 1 .. Day N ----
+        const headerRow = ['Phone Number'];
+        for (let d = 1; d <= daysInMonth; d++) {
+            headerRow.push(`${d}/${month}`);
+        }
+        worksheet.addRow(headerRow);
+
+        // Style the header row
+        const hRow = worksheet.getRow(1);
+        hRow.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11 };
+        hRow.alignment = { horizontal: 'center', vertical: 'middle' };
+        hRow.height = 28;
+        hRow.eachCell((cell, colNumber) => {
+            cell.fill = {
+                type: 'pattern', pattern: 'solid',
+                fgColor: { argb: 'FF128C7E' }  // WhatsApp teal
+            };
+            cell.border = {
+                top: { style: 'thin' }, bottom: { style: 'thin' },
+                left: { style: 'thin' }, right: { style: 'thin' }
+            };
+        });
+
+        // Set column widths
+        worksheet.getColumn(1).width = 20;
+        for (let d = 1; d <= daysInMonth; d++) {
+            worksheet.getColumn(d + 1).width = 18;
+        }
+
+        // ---- Data rows: one per phone ----
+        phones.forEach((phone, idx) => {
+            const rowData = ['+' + phone];
+            for (let d = 1; d <= daysInMonth; d++) {
+                const dayKey = String(d).padStart(2, '0');
+                const dayEntries = (monthData[dayKey] || []).filter(e => e.phone === phone);
+
+                if (dayEntries.length > 0) {
+                    // Show replies with time stamps
+                    const text = dayEntries.map(e => `[${e.time}] ${e.message}`).join('\n');
+                    rowData.push(text);
+                } else {
+                    rowData.push('');
+                }
+            }
+
+            const row = worksheet.addRow(rowData);
+            row.alignment = { vertical: 'top', wrapText: true };
+
+            // Alternate row background color
+            const bgColor = idx % 2 === 0 ? 'FFF0FFF0' : 'FFFFFFFF';
+            row.eachCell((cell) => {
+                cell.fill = {
+                    type: 'pattern', pattern: 'solid',
+                    fgColor: { argb: bgColor }
+                };
+                cell.border = {
+                    top: { style: 'thin', color: { argb: 'FFD0D0D0' } },
+                    bottom: { style: 'thin', color: { argb: 'FFD0D0D0' } },
+                    left: { style: 'thin', color: { argb: 'FFD0D0D0' } },
+                    right: { style: 'thin', color: { argb: 'FFD0D0D0' } }
+                };
+            });
+
+            // Bold the phone number cell
+            row.getCell(1).font = { bold: true };
+
+            // Color cells that have replies
+            for (let d = 1; d <= daysInMonth; d++) {
+                const cell = row.getCell(d + 1);
+                if (cell.value) {
+                    cell.fill = {
+                        type: 'pattern', pattern: 'solid',
+                        fgColor: { argb: 'FFDCFCE7' }  // Light green
+                    };
+                }
+            }
+        });
+
+        // Summary row
+        worksheet.addRow([]);
+        const summaryData = ['Total Replies'];
+        for (let d = 1; d <= daysInMonth; d++) {
+            const dayKey = String(d).padStart(2, '0');
+            const count = (monthData[dayKey] || []).length;
+            summaryData.push(count > 0 ? count : '');
+        }
+        const summaryRow = worksheet.addRow(summaryData);
+        summaryRow.font = { bold: true, color: { argb: 'FF128C7E' } };
+        summaryRow.eachCell((cell) => {
+            cell.alignment = { horizontal: 'center' };
+            cell.fill = {
+                type: 'pattern', pattern: 'solid',
+                fgColor: { argb: 'FFE8F5E9' }
+            };
+        });
+
+        // Set response headers for download
+        const filename = `WhatsApp_Replies_${sheetName.replace(' ', '_')}.xlsx`;
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+
+        await workbook.xlsx.write(res);
+        res.end();
+
+        console.log(`Excel report downloaded: ${filename}`);
+    } catch (err) {
+        console.error('Error generating Excel report:', err.message);
+        res.status(500).json({ error: 'Failed to generate report: ' + err.message });
+    }
+});
+
+// API route: get available months for the dropdown
+app.get('/api/reply-months', (req, res) => {
+    const months = Object.keys(repliesData).sort().reverse();
+    res.json({ months });
+});
+
+// API route: get reply stats for dashboard
+app.get('/api/reply-stats', (req, res) => {
+    const now = new Date();
+    const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const monthData = repliesData[monthKey] || {};
+
+    let totalReplies = 0;
+    const uniquePhones = new Set();
+    const todayKey = String(now.getDate()).padStart(2, '0');
+    let todayReplies = 0;
+
+    for (const dayKey in monthData) {
+        for (const entry of monthData[dayKey]) {
+            totalReplies++;
+            uniquePhones.add(entry.phone);
+        }
+    }
+
+    if (monthData[todayKey]) {
+        todayReplies = monthData[todayKey].length;
+    }
+
+    res.json({
+        month: monthKey,
+        totalReplies,
+        uniqueContacts: uniquePhones.size,
+        todayReplies
+    });
+});
 
 // Function to run the automation loop
 async function runAutomation(contacts, messageBody = null, minDelay = 6, maxDelay = 12, isScheduled = false) {

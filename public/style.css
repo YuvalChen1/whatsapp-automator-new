@@ -694,4 +694,197 @@ textarea:focus {
     background: rgba(0, 0, 0, 0.2) !important;
 }
 
+/* ============================================================
+   Reports Tab Styles
+   ============================================================ */
+
+/* Report Stat Cards */
+.report-stat-card {
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid var(--border-color);
+    border-radius: 14px;
+    padding: 1.25rem 1rem;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+    transition: all 0.3s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+.report-stat-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 60%;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--primary), transparent);
+    opacity: 0.6;
+}
+
+.report-stat-card:hover {
+    border-color: rgba(16, 185, 129, 0.3);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(16, 185, 129, 0.1);
+}
+
+.report-stat-card i {
+    font-size: 1.5rem;
+    color: var(--primary);
+    filter: drop-shadow(0 0 6px rgba(16, 185, 129, 0.3));
+}
+
+.report-stat-num {
+    display: block;
+    font-size: 2rem;
+    font-family: var(--font-heading);
+    font-weight: 700;
+    background: linear-gradient(135deg, #ffffff, var(--primary));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+.report-stat-label {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 500;
+}
+
+/* Report Divider */
+.report-divider {
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--border-color), transparent);
+    margin: 1.5rem 0;
+}
+
+/* Select dropdown styling */
+#report-month {
+    transition: border-color 0.2s ease;
+}
+
+#report-month:focus {
+    border-color: var(--primary) !important;
+}
+
+#report-month option {
+    background: #121a2c;
+    color: var(--text-primary);
+}
+
+/* Recent Replies List */
+.recent-replies-list {
+    max-height: 280px;
+    overflow-y: auto;
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 0.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+/* Scrollbar styling */
+.recent-replies-list::-webkit-scrollbar {
+    width: 5px;
+}
+
+.recent-replies-list::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.recent-replies-list::-webkit-scrollbar-thumb {
+    background: rgba(16, 185, 129, 0.3);
+    border-radius: 9999px;
+}
+
+/* Reply Item */
+.reply-item {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 0.75rem;
+    align-items: center;
+    padding: 0.65rem 0.85rem;
+    background: rgba(0, 0, 0, 0.15);
+    border-radius: 8px;
+    border: 1px solid transparent;
+    transition: all 0.2s ease;
+    animation: replySlideIn 0.3s ease;
+}
+
+@keyframes replySlideIn {
+    from {
+        opacity: 0;
+        transform: translateY(-8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.reply-item:hover {
+    background: rgba(16, 185, 129, 0.04);
+    border-color: rgba(16, 185, 129, 0.15);
+}
+
+.reply-phone {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--primary);
+    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.reply-phone i {
+    font-size: 0.7rem;
+    opacity: 0.7;
+}
+
+.reply-message {
+    font-size: 0.8rem;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.reply-time {
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    font-family: monospace;
+}
+
+/* No replies placeholder */
+.no-replies-placeholder {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    padding: 2.5rem 1rem;
+    color: var(--text-secondary);
+    text-align: center;
+}
+
+.no-replies-placeholder i {
+    font-size: 2.5rem;
+    opacity: 0.3;
+    color: var(--primary);
+}
+
+.no-replies-placeholder p {
+    font-size: 0.85rem;
+    max-width: 250px;
+    line-height: 1.5;
+}
 

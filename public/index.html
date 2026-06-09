@@ -79,8 +79,9 @@
                     <div class="tabs">
                         <button class="tab-btn active" onclick="switchTab('paste')"><i class="fas fa-edit"></i> Paste Contacts</button>
                         <button class="tab-btn" onclick="switchTab('csv')"><i class="fas fa-file-csv"></i> CSV Upload</button>
-                        <button class="tab-btn" onclick="switchTab('schedule')"><i class="fas fa-clock"></i> Daily Scheduler</button>
-                        <button class="tab-btn" onclick="switchTab('chatbot')"><i class="fas fa-robot"></i> Chatbot Rules</button>
+                        <button class="tab-btn" onclick="switchTab('schedule')"><i class="fas fa-clock"></i> Scheduler</button>
+                        <button class="tab-btn" onclick="switchTab('chatbot')"><i class="fas fa-robot"></i> Chatbot</button>
+                        <button class="tab-btn" onclick="switchTab('reports')"><i class="fas fa-chart-bar"></i> Reports</button>
                     </div>
 
                     <!-- Tab Content: Paste -->
@@ -191,6 +192,58 @@
                             <i class="fas fa-save"></i> Save Auto-Reply Rules
                         </button>
                     </div>
+
+                    <!-- Tab Content: Reports -->
+                    <div class="tab-content" id="tab-reports">
+                        <div class="schedule-status-banner active" id="reports-banner">
+                            <i class="fas fa-chart-line"></i>
+                            <span id="reports-banner-text">Reply Tracking — All incoming messages are logged automatically</span>
+                        </div>
+
+                        <div class="report-stats-grid" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin: 1.5rem 0;">
+                            <div class="report-stat-card">
+                                <i class="fas fa-reply-all"></i>
+                                <span class="report-stat-num" id="stat-month-replies">0</span>
+                                <span class="report-stat-label">This Month</span>
+                            </div>
+                            <div class="report-stat-card">
+                                <i class="fas fa-calendar-day"></i>
+                                <span class="report-stat-num" id="stat-today-replies">0</span>
+                                <span class="report-stat-label">Today</span>
+                            </div>
+                            <div class="report-stat-card">
+                                <i class="fas fa-users"></i>
+                                <span class="report-stat-num" id="stat-unique-contacts">0</span>
+                                <span class="report-stat-label">Unique Contacts</span>
+                            </div>
+                        </div>
+
+                        <div class="report-divider"></div>
+
+                        <h3 style="font-family: var(--font-heading); margin-bottom: 0.5rem; font-size: 1rem;"><i class="fas fa-file-excel" style="color: #10b981; margin-right: 0.5rem;"></i>Export Monthly Report</h3>
+                        <p class="field-desc">Download an Excel spreadsheet showing all replies for a selected month. Columns = days, rows = phone numbers.</p>
+
+                        <div class="form-group" style="margin-bottom: 1.5rem;">
+                            <label for="report-month">Select Month</label>
+                            <select id="report-month" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 8px; padding: 0.65rem; color: var(--text-primary); font-family: inherit; width: 100%; outline: none; cursor: pointer; appearance: none;">
+                                <option value="">Current Month</option>
+                            </select>
+                        </div>
+
+                        <button class="btn btn-primary btn-block" id="btn-download-report">
+                            <i class="fas fa-download"></i> Download Excel Report
+                        </button>
+
+                        <div class="recent-replies-section" style="margin-top: 1.5rem;">
+                            <h3 style="font-family: var(--font-heading); margin-bottom: 0.75rem; font-size: 1rem;"><i class="fas fa-clock-rotate-left" style="color: #10b981; margin-right: 0.5rem;"></i>Recent Replies</h3>
+                            <div class="recent-replies-list" id="recent-replies">
+                                <div class="no-replies-placeholder">
+                                    <i class="fas fa-inbox"></i>
+                                    <p>No replies recorded yet. Incoming messages will appear here in real-time.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Progress Section -->
@@ -291,18 +344,15 @@
             document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
             document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
             
-            if (tab === 'paste') {
-                document.querySelector('.tab-btn:nth-child(1)').classList.add('active');
-                document.getElementById('tab-paste').classList.add('active');
-            } else if (tab === 'csv') {
-                document.querySelector('.tab-btn:nth-child(2)').classList.add('active');
-                document.getElementById('tab-csv').classList.add('active');
-            } else if (tab === 'schedule') {
-                document.querySelector('.tab-btn:nth-child(3)').classList.add('active');
-                document.getElementById('tab-schedule').classList.add('active');
-            } else {
-                document.querySelector('.tab-btn:nth-child(4)').classList.add('active');
-                document.getElementById('tab-chatbot').classList.add('active');
+            const tabMap = { paste: 1, csv: 2, schedule: 3, chatbot: 4, reports: 5 };
+            const idx = tabMap[tab] || 1;
+            document.querySelector(`.tab-btn:nth-child(${idx})`).classList.add('active');
+            document.getElementById(`tab-${tab}`).classList.add('active');
+
+            // Load report stats when switching to reports tab
+            if (tab === 'reports') {
+                loadReplyStats();
+                loadAvailableMonths();
             }
         }
 
@@ -653,6 +703,95 @@
                 socket.emit('logout');
             }
         });
+
+        // ============================================================
+        //  Reports Tab Logic
+        // ============================================================
+        const recentRepliesContainer = document.getElementById('recent-replies');
+        const replyMonthSelect = document.getElementById('report-month');
+        const btnDownloadReport = document.getElementById('btn-download-report');
+        let recentRepliesList = [];
+
+        async function loadReplyStats() {
+            try {
+                const res = await fetch('/api/reply-stats');
+                const data = await res.json();
+                document.getElementById('stat-month-replies').textContent = data.totalReplies;
+                document.getElementById('stat-today-replies').textContent = data.todayReplies;
+                document.getElementById('stat-unique-contacts').textContent = data.uniqueContacts;
+            } catch (err) {
+                console.error('Failed to load reply stats:', err);
+            }
+        }
+
+        async function loadAvailableMonths() {
+            try {
+                const res = await fetch('/api/reply-months');
+                const data = await res.json();
+                const select = replyMonthSelect;
+                // Keep the first default option
+                select.innerHTML = '<option value="">Current Month</option>';
+                data.months.forEach(m => {
+                    const [y, mo] = m.split('-');
+                    const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+                    const label = `${monthNames[parseInt(mo, 10) - 1]} ${y}`;
+                    const opt = document.createElement('option');
+                    opt.value = m;
+                    opt.textContent = label;
+                    select.appendChild(opt);
+                });
+            } catch (err) {
+                console.error('Failed to load available months:', err);
+            }
+        }
+
+        btnDownloadReport.addEventListener('click', () => {
+            const month = replyMonthSelect.value;
+            const url = month ? `/download-report?month=${month}` : '/download-report';
+            window.open(url, '_blank');
+            addLog('📊 Excel report download started.', 'success');
+        });
+
+        // Real-time reply updates
+        socket.on('new_reply', (data) => {
+            // Update stats counters
+            const monthReplyEl = document.getElementById('stat-month-replies');
+            const todayReplyEl = document.getElementById('stat-today-replies');
+            monthReplyEl.textContent = parseInt(monthReplyEl.textContent) + 1;
+
+            const now = new Date();
+            const todayKey = String(now.getDate()).padStart(2, '0');
+            if (data.day === todayKey) {
+                todayReplyEl.textContent = parseInt(todayReplyEl.textContent) + 1;
+            }
+
+            // Add to recent replies list (keep last 20)
+            recentRepliesList.unshift(data);
+            if (recentRepliesList.length > 20) recentRepliesList.pop();
+            renderRecentReplies();
+
+            // Also log it
+            addLog(`📩 Reply from +${data.phone}: "${data.message}"`, 'info');
+        });
+
+        function renderRecentReplies() {
+            if (recentRepliesList.length === 0) {
+                recentRepliesContainer.innerHTML = `
+                    <div class="no-replies-placeholder">
+                        <i class="fas fa-inbox"></i>
+                        <p>No replies recorded yet. Incoming messages will appear here in real-time.</p>
+                    </div>`;
+                return;
+            }
+
+            recentRepliesContainer.innerHTML = recentRepliesList.map(r => `
+                <div class="reply-item">
+                    <div class="reply-phone"><i class="fas fa-user"></i> +${r.phone}</div>
+                    <div class="reply-message">${r.message}</div>
+                    <div class="reply-time">${r.time}</div>
+                </div>
+            `).join('');
+        }
     </script>
 </body>
 </html>
