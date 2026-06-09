@@ -1,0 +1,12 @@
+[
+  {
+    "phone": "972500000000",
+    "name": "John Doe",
+    "message": "Hi John, this is an automated message!"
+  },
+  {
+    "phone": "972500000001",
+    "name": "Jane Smith",
+    "message": "Hello Jane, hope you are doing well!"
+  }
+]

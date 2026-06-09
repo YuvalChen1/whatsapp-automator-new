@@ -1,0 +1,658 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WhatsApp Automation Hub</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+    <!-- FontAwesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <div class="glow-bg"></div>
+    
+    <div class="container">
+        <!-- Header -->
+        <header>
+            <div class="logo">
+                <i class="fab fa-whatsapp logo-icon"></i>
+                <div>
+                    <h1>WhatsApp Automator</h1>
+                    <p>Send personalized messages seamlessly</p>
+                </div>
+            </div>
+            <div class="status-badge disconnected" id="connection-status">
+                <span class="status-dot"></span>
+                <span class="status-text">Connecting Server...</span>
+            </div>
+        </header>
+
+        <main class="grid-layout">
+            <!-- Left Panel: Connection & Setup -->
+            <section class="panel panel-left">
+                <div class="panel-header">
+                    <h2><i class="fas fa-qrcode"></i> Connection Status</h2>
+                </div>
+                <div class="qr-container" id="qr-container">
+                    <div class="qr-placeholder" id="qr-placeholder">
+                        <i class="fas fa-spinner fa-spin"></i>
+                        <p>Waiting for WhatsApp client initialization...</p>
+                    </div>
+                    <img id="qr-image" class="qr-image" src="" alt="WhatsApp QR Code" style="display: none;">
+                    <div class="authenticated-state" id="auth-state" style="display: none;">
+                        <div class="success-checkmark">
+                            <div class="check-icon">
+                                <span class="icon-line line-tip"></span>
+                                <span class="icon-line line-long"></span>
+                                <div class="icon-circle"></div>
+                                <div class="icon-fix"></div>
+                            </div>
+                        </div>
+                        <h3>Successfully Connected!</h3>
+                        <p>WhatsApp Client is authenticated and ready to automate.</p>
+                        <button class="btn btn-danger btn-sm" id="btn-logout"><i class="fas fa-sign-out-alt"></i> Disconnect Session</button>
+                    </div>
+                </div>
+                
+                <div class="instructions">
+                    <h3>How to connect:</h3>
+                    <ol>
+                        <li>Open WhatsApp on your mobile phone.</li>
+                        <li>Tap <strong>Menu</strong> (Android) or <strong>Settings</strong> (iOS) &gt; <strong>Linked Devices</strong>.</li>
+                        <li>Tap <strong>Link a Device</strong>.</li>
+                        <li>Point your phone's camera at the QR code above.</li>
+                    </ol>
+                </div>
+            </section>
+
+            <!-- Right Panel: Automation Console -->
+            <section class="panel panel-right">
+                <div class="panel-header">
+                    <h2><i class="fas fa-paper-plane"></i> Message Automation</h2>
+                </div>
+
+                <!-- Input Section -->
+                <div class="automation-section" id="input-section">
+                    <div class="tabs">
+                        <button class="tab-btn active" onclick="switchTab('paste')"><i class="fas fa-edit"></i> Paste Contacts</button>
+                        <button class="tab-btn" onclick="switchTab('csv')"><i class="fas fa-file-csv"></i> CSV Upload</button>
+                        <button class="tab-btn" onclick="switchTab('schedule')"><i class="fas fa-clock"></i> Daily Scheduler</button>
+                        <button class="tab-btn" onclick="switchTab('chatbot')"><i class="fas fa-robot"></i> Chatbot Rules</button>
+                    </div>
+
+                    <!-- Tab Content: Paste -->
+                    <div class="tab-content active" id="tab-paste">
+                        <p class="field-desc">Enter phone numbers (with country code, e.g., 972500000000) and message content. Format: <code>Phone|Name|Custom Message</code> (One per line). Name and message are optional.</p>
+                        <textarea id="contacts-input" placeholder="972500000000|John Doe|Hi John, testing automation!&#10;972500000001|Jane Smith|Hello Jane!"></textarea>
+                        
+                        <div class="options-grid">
+                            <div class="form-group">
+                                <label for="min-delay">Min Delay (sec)</label>
+                                <input type="number" id="min-delay" value="6" min="2" max="60">
+                            </div>
+                            <div class="form-group">
+                                <label for="max-delay">Max Delay (sec)</label>
+                                <input type="number" id="max-delay" value="12" min="2" max="60">
+                            </div>
+                        </div>
+
+                        <button class="btn btn-primary btn-block btn-start-manual" disabled>
+                            <i class="fas fa-play"></i> Start Sending Messages
+                        </button>
+                    </div>
+
+                    <!-- Tab Content: CSV -->
+                    <div class="tab-content" id="tab-csv">
+                        <p class="field-desc">Upload a CSV file containing columns named exactly: <code>phone</code>, <code>name</code> (optional), and <code>message</code> (optional).</p>
+                        <div class="file-upload-wrapper">
+                            <label for="csv-file" class="file-upload-label">
+                                <i class="fas fa-cloud-upload-alt"></i>
+                                <span>Choose CSV file or drag here</span>
+                                <input type="file" id="csv-file" accept=".csv">
+                            </label>
+                            <div id="file-name-display" class="file-name">No file chosen</div>
+                        </div>
+                        
+                        <div class="options-grid" style="margin-top: 1.5rem;">
+                            <div class="form-group">
+                                <label for="min-delay-csv">Min Delay (sec)</label>
+                                <input type="number" id="min-delay-csv" value="6" min="2" max="60">
+                            </div>
+                            <div class="form-group">
+                                <label for="max-delay-csv">Max Delay (sec)</label>
+                                <input type="number" id="max-delay-csv" value="12" min="2" max="60">
+                            </div>
+                        </div>
+
+                        <button class="btn btn-primary btn-block btn-start-manual" id="btn-start-csv" disabled>
+                            <i class="fas fa-play"></i> Start Sending CSV Messages
+                        </button>
+                    </div>
+
+                    <!-- Tab Content: Schedule -->
+                    <div class="tab-content" id="tab-schedule">
+                        <div class="schedule-status-banner" id="schedule-banner">
+                            <i class="fas fa-bell"></i>
+                            <span id="schedule-banner-text">Scheduler Status: Disabled</span>
+                        </div>
+
+                        <p class="field-desc" style="margin-top: 1rem;">Set up an automatic daily broadcast. Format: <code>Phone|Name</code> (One per line). Name is optional.</p>
+                        <textarea id="schedule-contacts" placeholder="972500000000|John Doe&#10;972500000001|Jane Smith" style="height: 120px;"></textarea>
+
+                        <div class="form-group" style="margin-bottom: 1rem;">
+                            <label for="schedule-message">Broadcast Message</label>
+                            <textarea id="schedule-message" placeholder="Type the message that will be broadcasted to all above contacts daily..." style="height: 80px; font-family: inherit;"></textarea>
+                        </div>
+
+                        <div class="options-grid">
+                            <div class="form-group">
+                                <label for="schedule-time">Trigger Time (Every day)</label>
+                                <input type="time" id="schedule-time" value="07:00">
+                            </div>
+                            <div class="form-group" style="justify-content: flex-end;">
+                                <label style="opacity: 0;">Toggle</label>
+                                <button class="btn btn-block" id="btn-toggle-schedule" style="background: rgba(255,255,255,0.05); color: var(--text-secondary); border: 1px solid var(--border-color);">
+                                    Enable Schedule
+                                </button>
+                            </div>
+                        </div>
+
+                        <button class="btn btn-primary btn-block" id="btn-save-schedule">
+                            <i class="fas fa-save"></i> Save Schedule Configuration
+                        </button>
+                    </div>
+
+                    <!-- Tab Content: Chatbot -->
+                    <div class="tab-content" id="tab-chatbot">
+                        <div class="schedule-status-banner" id="chatbot-banner">
+                            <i class="fas fa-robot"></i>
+                            <span id="chatbot-banner-text">Chatbot Status: Active</span>
+                        </div>
+
+                        <p class="field-desc" style="margin-top: 1rem;">Define automated auto-responses when people reply to your messages. Multiple triggers can be separated by commas (e.g. <code>1, fine, good</code>).</p>
+                        
+                        <div id="rules-container" style="display: flex; flex-direction: column; gap: 1rem; margin-bottom: 1.5rem;">
+                            <!-- Rules get dynamically generated here -->
+                        </div>
+
+                        <div class="options-grid">
+                            <button class="btn btn-block" id="btn-add-rule" style="background: rgba(255,255,255,0.05); border: 1px dashed var(--border-color); color: var(--text-primary);">
+                                <i class="fas fa-plus"></i> Add Reply Rule
+                            </button>
+                            <button class="btn btn-block" id="btn-toggle-chatbot" style="background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); color: var(--text-secondary);">
+                                Disable Chatbot
+                            </button>
+                        </div>
+
+                        <button class="btn btn-primary btn-block" id="btn-save-chatbot" style="margin-top: 1rem;">
+                            <i class="fas fa-save"></i> Save Auto-Reply Rules
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Progress Section -->
+                <div class="automation-section" id="progress-section" style="display: none;">
+                    <div class="progress-stats">
+                        <div class="stat-card">
+                            <span class="stat-num" id="stat-total">0</span>
+                            <span class="stat-label">Total</span>
+                        </div>
+                        <div class="stat-card">
+                            <span class="stat-num text-success" id="stat-sent">0</span>
+                            <span class="stat-label">Sent</span>
+                        </div>
+                        <div class="stat-card">
+                            <span class="stat-num text-danger" id="stat-failed">0</span>
+                            <span class="stat-label">Failed</span>
+                        </div>
+                    </div>
+
+                    <div class="progress-bar-wrapper">
+                        <div class="progress-bar-container">
+                            <div class="progress-bar" id="progress-bar" style="width: 0%;"></div>
+                        </div>
+                        <div class="progress-percentage" id="progress-percent">0%</div>
+                    </div>
+
+                    <div class="console-log-header">
+                        <h3>Execution Logs</h3>
+                        <button class="btn btn-link btn-sm" id="btn-clear-logs">Clear</button>
+                    </div>
+                    <div class="console-log" id="console-log">
+                        <div class="log-entry system">Console ready...</div>
+                    </div>
+
+                    <button class="btn btn-outline-danger btn-block" id="btn-stop">
+                        <i class="fas fa-stop"></i> Stop / Reset
+                    </button>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Socket.io client -->
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+        let clientReady = false;
+        let isProcessing = false;
+        let csvContactsList = [];
+        let currentTab = 'paste';
+        let isScheduleActive = false;
+        let isChatbotActive = true;
+
+        // UI Elements
+        const connectionStatus = document.getElementById('connection-status');
+        const qrContainer = document.getElementById('qr-container');
+        const qrPlaceholder = document.getElementById('qr-placeholder');
+        const qrImage = document.getElementById('qr-image');
+        const authState = document.getElementById('auth-state');
+        const btnsStartManual = document.querySelectorAll('.btn-start-manual');
+        const btnStop = document.getElementById('btn-stop');
+        const btnLogout = document.getElementById('btn-logout');
+        const contactsInput = document.getElementById('contacts-input');
+        const csvFile = document.getElementById('csv-file');
+        const fileNameDisplay = document.getElementById('file-name-display');
+        const inputSection = document.getElementById('input-section');
+        const progressSection = document.getElementById('progress-section');
+        const consoleLog = document.getElementById('console-log');
+        const btnClearLogs = document.getElementById('btn-clear-logs');
+        
+        // Scheduler Elements
+        const scheduleContacts = document.getElementById('schedule-contacts');
+        const scheduleMessage = document.getElementById('schedule-message');
+        const scheduleTime = document.getElementById('schedule-time');
+        const btnToggleSchedule = document.getElementById('btn-toggle-schedule');
+        const btnSaveSchedule = document.getElementById('btn-save-schedule');
+        const scheduleBanner = document.getElementById('schedule-banner');
+        const scheduleBannerText = document.getElementById('schedule-banner-text');
+
+        // Chatbot Elements
+        const rulesContainer = document.getElementById('rules-container');
+        const btnAddRule = document.getElementById('btn-add-rule');
+        const btnToggleChatbot = document.getElementById('btn-toggle-chatbot');
+        const btnSaveChatbot = document.getElementById('btn-save-chatbot');
+        const chatbotBanner = document.getElementById('chatbot-banner');
+        const chatbotBannerText = document.getElementById('chatbot-banner-text');
+
+        // Stats
+        const statTotal = document.getElementById('stat-total');
+        const statSent = document.getElementById('stat-sent');
+        const statFailed = document.getElementById('stat-failed');
+        const progressBar = document.getElementById('progress-bar');
+        const progressPercent = document.getElementById('progress-percent');
+
+        // Tab Switching
+        function switchTab(tab) {
+            currentTab = tab;
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+            
+            if (tab === 'paste') {
+                document.querySelector('.tab-btn:nth-child(1)').classList.add('active');
+                document.getElementById('tab-paste').classList.add('active');
+            } else if (tab === 'csv') {
+                document.querySelector('.tab-btn:nth-child(2)').classList.add('active');
+                document.getElementById('tab-csv').classList.add('active');
+            } else if (tab === 'schedule') {
+                document.querySelector('.tab-btn:nth-child(3)').classList.add('active');
+                document.getElementById('tab-schedule').classList.add('active');
+            } else {
+                document.querySelector('.tab-btn:nth-child(4)').classList.add('active');
+                document.getElementById('tab-chatbot').classList.add('active');
+            }
+        }
+
+        // CSV File reader
+        csvFile.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            fileNameDisplay.textContent = file.name;
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const text = e.target.result;
+                parseCSV(text);
+            };
+            reader.readAsText(file);
+        });
+
+        function parseCSV(text) {
+            const lines = text.split('\n');
+            if (lines.length < 2) {
+                addLog('Invalid CSV format: Too few lines.', 'error');
+                return;
+            }
+
+            const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+            const phoneIdx = headers.indexOf('phone');
+            const nameIdx = headers.indexOf('name');
+            const msgIdx = headers.indexOf('message');
+
+            if (phoneIdx === -1) {
+                addLog('CSV error: Could not find "phone" column.', 'error');
+                return;
+            }
+
+            csvContactsList = [];
+            for (let i = 1; i < lines.length; i++) {
+                if (!lines[i].trim()) continue;
+                const columns = lines[i].split(',').map(c => c.trim());
+                if (columns.length < 1) continue;
+
+                const phone = columns[phoneIdx];
+                const name = nameIdx !== -1 ? columns[nameIdx] : '';
+                const message = msgIdx !== -1 ? columns[msgIdx] : '';
+
+                if (phone) {
+                    csvContactsList.push({ phone, name, message });
+                }
+            }
+
+            addLog(`Successfully loaded ${csvContactsList.length} contacts from CSV.`, 'success');
+        }
+
+        // Logs handler
+        function addLog(message, type = 'info') {
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            const time = new Date().toLocaleTimeString();
+            entry.innerHTML = `<span class="log-time">[${time}]</span> ${message}`;
+            consoleLog.appendChild(entry);
+            consoleLog.scrollTop = consoleLog.scrollHeight;
+        }
+
+        btnClearLogs.addEventListener('click', () => {
+            consoleLog.innerHTML = '<div class="log-entry system">Console cleared.</div>';
+        });
+
+        // Toggle schedule
+        btnToggleSchedule.addEventListener('click', () => {
+            isScheduleActive = !isScheduleActive;
+            updateScheduleToggleUI();
+        });
+
+        function updateScheduleToggleUI() {
+            if (isScheduleActive) {
+                btnToggleSchedule.textContent = 'Active (Disable)';
+                btnToggleSchedule.style.background = 'rgba(16, 185, 129, 0.1)';
+                btnToggleSchedule.style.color = 'var(--primary)';
+                btnToggleSchedule.style.borderColor = 'rgba(16, 185, 129, 0.3)';
+            } else {
+                btnToggleSchedule.textContent = 'Disabled (Enable)';
+                btnToggleSchedule.style.background = 'rgba(255, 255, 255, 0.05)';
+                btnToggleSchedule.style.color = 'var(--text-secondary)';
+                btnToggleSchedule.style.borderColor = 'var(--border-color)';
+            }
+        }
+
+        // Toggle Chatbot
+        btnToggleChatbot.addEventListener('click', () => {
+            isChatbotActive = !isChatbotActive;
+            updateChatbotToggleUI();
+        });
+
+        function updateChatbotToggleUI() {
+            if (isChatbotActive) {
+                btnToggleChatbot.textContent = 'Active (Disable)';
+                btnToggleChatbot.style.background = 'rgba(16, 185, 129, 0.1)';
+                btnToggleChatbot.style.color = 'var(--primary)';
+                btnToggleChatbot.style.borderColor = 'rgba(16, 185, 129, 0.3)';
+                chatbotBanner.className = 'schedule-status-banner active';
+                chatbotBannerText.textContent = 'Chatbot Status: Active';
+            } else {
+                btnToggleChatbot.textContent = 'Disabled (Enable)';
+                btnToggleChatbot.style.background = 'rgba(255, 255, 255, 0.05)';
+                btnToggleChatbot.style.color = 'var(--text-secondary)';
+                btnToggleChatbot.style.borderColor = 'var(--border-color)';
+                chatbotBanner.className = 'schedule-status-banner';
+                chatbotBannerText.textContent = 'Chatbot Status: Disabled';
+            }
+        }
+
+        // Add dynamically a new rule card to UI
+        function createRuleElement(triggerVal = '', replyVal = '') {
+            const ruleId = 'rule-' + Math.random().toString(36).substr(2, 9);
+            const card = document.createElement('div');
+            card.className = 'rule-card';
+            card.id = ruleId;
+            card.style.display = 'flex';
+            card.style.gap = '0.5rem';
+            card.style.alignItems = 'center';
+            card.innerHTML = `
+                <input type="text" class="rule-trigger" placeholder="Trigger e.g. 1, fine" value="${triggerVal}" style="flex: 3; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 8px; padding: 0.65rem; color: var(--text-primary);">
+                <input type="text" class="rule-reply" placeholder="Auto-reply message" value="${replyVal}" style="flex: 5; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 8px; padding: 0.65rem; color: var(--text-primary);">
+                <button class="btn btn-danger btn-sm" onclick="document.getElementById('${ruleId}').remove()" style="padding: 0.7rem;"><i class="fas fa-trash"></i></button>
+            `;
+            rulesContainer.appendChild(card);
+        }
+
+        btnAddRule.addEventListener('click', () => {
+            createRuleElement();
+        });
+
+        // Save Chatbot rules
+        btnSaveChatbot.addEventListener('click', () => {
+            const cards = rulesContainer.querySelectorAll('.rule-card');
+            const rules = [];
+            cards.forEach(card => {
+                const trigger = card.querySelector('.rule-trigger').value.trim();
+                const reply = card.querySelector('.rule-reply').value.trim();
+                if (trigger && reply) {
+                    rules.push({ trigger, reply });
+                }
+            });
+
+            const config = {
+                enabled: isChatbotActive,
+                rules: rules
+            };
+
+            socket.emit('save_chatbot_rules', config);
+        });
+
+        // Save Schedule Config
+        btnSaveSchedule.addEventListener('click', () => {
+            const lines = scheduleContacts.value.trim().split('\n');
+            const contacts = [];
+            lines.forEach(line => {
+                const parts = line.split('|');
+                if (parts[0]) {
+                    contacts.push({
+                        phone: parts[0].trim(),
+                        name: parts[1] ? parts[1].trim() : ''
+                    });
+                }
+            });
+
+            const config = {
+                enabled: isScheduleActive,
+                time: scheduleTime.value,
+                contacts: contacts,
+                message: scheduleMessage.value.trim()
+            };
+
+            socket.emit('save_schedule', config);
+        });
+
+        // Socket Events
+        socket.on('connect', () => {
+            connectionStatus.className = 'status-badge connected';
+            connectionStatus.querySelector('.status-text').textContent = 'Server Connected';
+            addLog('Connected to automation server.', 'success');
+        });
+
+        socket.on('disconnect', () => {
+            connectionStatus.className = 'status-badge disconnected';
+            connectionStatus.querySelector('.status-text').textContent = 'Server Offline';
+            addLog('Disconnected from automation server.', 'error');
+        });
+
+        socket.on('qr', (qrCodeUrl) => {
+            qrPlaceholder.style.display = 'none';
+            authState.style.display = 'none';
+            qrImage.src = qrCodeUrl;
+            qrImage.style.display = 'block';
+            addLog('New QR code received. Please scan.', 'info');
+        });
+
+        socket.on('authenticated', () => {
+            qrPlaceholder.style.display = 'none';
+            qrImage.style.display = 'none';
+            authState.style.display = 'flex';
+            addLog('WhatsApp successfully authenticated!', 'success');
+        });
+
+        socket.on('ready', () => {
+            clientReady = true;
+            if (!isProcessing) {
+                btnsStartManual.forEach(btn => btn.disabled = false);
+            }
+            qrPlaceholder.style.display = 'none';
+            qrImage.style.display = 'none';
+            authState.style.display = 'flex';
+            addLog('WhatsApp client ready to send messages.', 'success');
+        });
+
+        socket.on('disconnected', () => {
+            clientReady = false;
+            btnsStartManual.forEach(btn => btn.disabled = true);
+            qrPlaceholder.style.display = 'flex';
+            qrPlaceholder.innerHTML = '<i class="fas fa-qrcode"></i><p>Scanned out. Waiting for QR code...</p>';
+            qrImage.style.display = 'none';
+            authState.style.display = 'none';
+            addLog('WhatsApp client disconnected.', 'error');
+        });
+
+        // Receive schedule updates
+        socket.on('schedule_update', (config) => {
+            isScheduleActive = config.enabled;
+            scheduleTime.value = config.time || '07:00';
+            scheduleMessage.value = config.message || '';
+            
+            if (config.contacts && Array.isArray(config.contacts)) {
+                scheduleContacts.value = config.contacts
+                    .map(c => c.name ? `${c.phone}|${c.name}` : c.phone)
+                    .join('\n');
+            }
+
+            updateScheduleToggleUI();
+
+            if (isScheduleActive) {
+                scheduleBanner.className = 'schedule-status-banner active';
+                scheduleBannerText.textContent = `Scheduler Status: Active (Triggers daily at ${config.time})`;
+            } else {
+                scheduleBanner.className = 'schedule-status-banner';
+                scheduleBannerText.textContent = 'Scheduler Status: Disabled';
+            }
+        });
+
+        // Receive chatbot config updates
+        socket.on('chatbot_update', (config) => {
+            isChatbotActive = config.enabled;
+            updateChatbotToggleUI();
+
+            rulesContainer.innerHTML = '';
+            if (config.rules && Array.isArray(config.rules)) {
+                config.rules.forEach(rule => {
+                    createRuleElement(rule.trigger, rule.reply);
+                });
+            }
+        });
+
+        // Automation Progress events
+        socket.on('automation_start', (total) => {
+            isProcessing = true;
+            inputSection.style.display = 'none';
+            progressSection.style.display = 'block';
+            statTotal.textContent = total;
+            statSent.textContent = '0';
+            statFailed.textContent = '0';
+            progressBar.style.width = '0%';
+            progressPercent.textContent = '0%';
+            addLog(`Automation started for ${total} contacts.`, 'info');
+        });
+
+        socket.on('automation_progress', (data) => {
+            statSent.textContent = data.sent;
+            statFailed.textContent = data.failed;
+            const percentage = Math.round((data.current / data.total) * 100);
+            progressBar.style.width = `${percentage}%`;
+            progressPercent.textContent = `${percentage}%`;
+        });
+
+        socket.on('automation_log', (data) => {
+            addLog(data.message, data.type);
+        });
+
+        socket.on('automation_end', (data) => {
+            isProcessing = false;
+            addLog(`Automation complete! Sent: ${data.sent}, Failed: ${data.failed}`, 'success');
+        });
+
+        // Event Listeners for manual triggers
+        btnsStartManual.forEach(btn => {
+            btn.addEventListener('click', () => {
+                let contacts = [];
+
+                if (currentTab === 'paste') {
+                    const text = contactsInput.value.trim();
+                    if (!text) {
+                        alert('Please enter at least one contact.');
+                        return;
+                    }
+                    const lines = text.split('\n');
+                    lines.forEach(line => {
+                        const parts = line.split('|');
+                        if (parts[0]) {
+                            contacts.push({
+                                phone: parts[0].trim(),
+                                name: parts[1] ? parts[1].trim() : '',
+                                message: parts[2] ? parts[2].trim() : ''
+                            });
+                        }
+                    });
+                } else if (currentTab === 'csv') {
+                    if (csvContactsList.length === 0) {
+                        alert('Please upload a valid CSV file first.');
+                        return;
+                    }
+                    contacts = csvContactsList;
+                }
+
+                if (contacts.length === 0) {
+                    alert('No valid contacts found.');
+                    return;
+                }
+
+                let minDelay = 6, maxDelay = 12;
+                if (currentTab === 'paste') {
+                    minDelay = parseInt(document.getElementById('min-delay').value) || 6;
+                    maxDelay = parseInt(document.getElementById('max-delay').value) || 12;
+                } else {
+                    minDelay = parseInt(document.getElementById('min-delay-csv').value) || 6;
+                    maxDelay = parseInt(document.getElementById('max-delay-csv').value) || 12;
+                }
+
+                socket.emit('start_automation', { contacts, minDelay, maxDelay });
+            });
+        });
+
+        btnStop.addEventListener('click', () => {
+            socket.emit('stop_automation');
+            inputSection.style.display = 'block';
+            progressSection.style.display = 'none';
+            isProcessing = false;
+        });
+
+        btnLogout.addEventListener('click', () => {
+            if (confirm('Are you sure you want to disconnect WhatsApp?')) {
+                socket.emit('logout');
+            }
+        });
+    </script>
+</body>
+</html>

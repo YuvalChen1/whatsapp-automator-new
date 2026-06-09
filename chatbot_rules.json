@@ -1,0 +1,17 @@
+{
+  "enabled": true,
+  "rules": [
+    {
+      "trigger": "1,fine,good",
+      "reply": "Awesome! Glad to hear that you are doing well. 😊"
+    },
+    {
+      "trigger": "2,sick,bad",
+      "reply": "Oh no! Really sorry to hear that. Rest up and feel better soon! ❤️"
+    },
+    {
+      "trigger": "3,same,ok",
+      "reply": "testing"
+    }
+  ]
+}
