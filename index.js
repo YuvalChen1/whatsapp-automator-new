@@ -27,8 +27,63 @@ const PERSISTENT_SESSION_DIR = path.join(DATA_DIR, 'session-backup');
 const LOCAL_AUTH_DIR = '/tmp/wwebjs_auth';
 const LOCAL_SESSION_DIR = path.join(LOCAL_AUTH_DIR, 'session');
 
+app.use(express.json());
+
+// === AUTHENTICATION MIDDLEWARE ===
+const AUTH_USER = process.env.AUTH_USER || 'admin';
+const AUTH_PASS = process.env.AUTH_PASS || 'admin123';
+const SESSION_TOKEN = Buffer.from(`${AUTH_USER}:${AUTH_PASS}`).toString('base64');
+
+function getSessionCookie(req) {
+    if (!req.headers.cookie) return null;
+    const cookies = req.headers.cookie.split(';').reduce((acc, cookie) => {
+        const [key, val] = cookie.trim().split('=');
+        if (key && val) acc[key] = val;
+        return acc;
+    }, {});
+    return cookies['auth_session'];
+}
+
+function requireAuth(req, res, next) {
+    // Exclude login routes
+    if (req.path === '/login' || req.path === '/api/login') {
+        return next();
+    }
+
+    const session = getSessionCookie(req);
+    if (session === SESSION_TOKEN) {
+        return next();
+    }
+
+    // Protect REST endpoints with 401 response
+    if (req.path.startsWith('/api/') || req.path === '/download-report') {
+        return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    // Redirect webpage requests to login page
+    res.redirect('/login');
+}
+
+app.use(requireAuth);
+
 // Serve static UI assets
 app.use(express.static(path.join(__dirname, 'public')));
+
+// Serve login page
+app.get('/login', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'login.html'));
+});
+
+// Login POST endpoint
+app.post('/api/login', (req, res) => {
+    const { username, password } = req.body || {};
+    if (username === AUTH_USER && password === AUTH_PASS) {
+        // Set HTTP-only session cookie valid for 30 days
+        res.setHeader('Set-Cookie', `auth_session=${SESSION_TOKEN}; Path=/; HttpOnly; Max-Age=${30 * 24 * 60 * 60}; SameSite=Lax`);
+        return res.json({ success: true });
+    }
+    return res.status(401).json({ error: 'Invalid username or password' });
+});
 
 // Global state variables
 let whatsappClientReady = false;
@@ -771,6 +826,24 @@ function applySchedule() {
 
 // Initial schedule setup
 applySchedule();
+
+// Socket.io Middleware to authenticate connection
+io.use((socket, next) => {
+    const cookieHeader = socket.handshake.headers.cookie;
+    if (!cookieHeader) {
+        return next(new Error('Authentication error: No cookies found'));
+    }
+    const cookies = cookieHeader.split(';').reduce((acc, cookie) => {
+        const [key, val] = cookie.trim().split('=');
+        if (key && val) acc[key] = val;
+        return acc;
+    }, {});
+    const session = cookies['auth_session'];
+    if (session === SESSION_TOKEN) {
+        return next();
+    }
+    next(new Error('Authentication error: Invalid session'));
+});
 
 // Socket.io Connection Logic
 io.on('connection', (socket) => {
