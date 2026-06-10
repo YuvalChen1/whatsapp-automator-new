@@ -128,6 +128,60 @@ function logReply(phone, messageText) {
     io.emit('new_reply', { phone, message: messageText, time: timeStr, day: dayKey, month: monthKey });
 }
 
+// Debug: List files in DATA_DIR on startup to trace lock files
+function debugListFiles(dir, prefix = '') {
+    if (!fs.existsSync(dir)) {
+        console.log(`${prefix} Directory does not exist: ${dir}`);
+        return;
+    }
+    try {
+        const files = fs.readdirSync(dir);
+        console.log(`${prefix} Listing ${dir}:`);
+        files.forEach(file => {
+            const fullPath = path.join(dir, file);
+            let isLink = false;
+            try {
+                const stat = fs.lstatSync(fullPath);
+                isLink = stat.isSymbolicLink();
+                if (stat.isDirectory()) {
+                    console.log(`${prefix}  [DIR] ${file}`);
+                    if (file === 'session' || file === 'session-Default' || file === 'Default') {
+                        debugListFiles(fullPath, prefix + '    ');
+                    }
+                } else {
+                    console.log(`${prefix}  [FILE] ${file} ${isLink ? '(Symlink)' : ''}`);
+                }
+            } catch (e) {
+                console.log(`${prefix}  [ERROR] ${file}: ${e.message}`);
+            }
+        });
+    } catch (e) {
+        console.log(`${prefix} Failed to read directory: ${e.message}`);
+    }
+}
+
+console.log('--- Startup Diagnostics ---');
+debugListFiles(DATA_DIR);
+console.log('---------------------------');
+
+// Graceful shutdown handler
+async function gracefulShutdown(signal) {
+    console.log(`Received ${signal}. Shutting down gracefully...`);
+    try {
+        if (client) {
+            console.log('Destroying WhatsApp client...');
+            await client.destroy();
+            console.log('WhatsApp client destroyed.');
+        }
+    } catch (err) {
+        console.error('Error destroying client during shutdown:', err.message);
+    }
+    process.exit(0);
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
 // Helper: Clean up Puppeteer SingletonLock if it exists from a previous crash/restart
 // Note: We use a direct try-unlink approach because fs.existsSync returns false for broken symlinks,
 // which is exactly what a lingering lock file is.
