@@ -422,6 +422,27 @@ app.get('/api/reply-stats', (req, res) => {
     });
 });
 
+// API route: fetch all WhatsApp groups for the picker
+app.get('/api/groups', async (req, res) => {
+    if (!whatsappClientReady) {
+        return res.status(503).json({ error: 'WhatsApp client is not connected. Please scan the QR code first.' });
+    }
+    try {
+        const chats = await client.getChats();
+        const groups = chats
+            .filter(chat => chat.isGroup)
+            .map(group => ({
+                id: group.id._serialized,
+                name: group.name || 'Unnamed Group'
+            }))
+            .sort((a, b) => a.name.localeCompare(b.name));
+        res.json({ groups });
+    } catch (err) {
+        console.error('Error fetching groups:', err.message);
+        res.status(500).json({ error: 'Failed to fetch groups: ' + err.message });
+    }
+});
+
 // Function to run the automation loop
 async function runAutomation(contacts, messageBody = null, minDelay = 6, maxDelay = 12, isScheduled = false) {
     if (!whatsappClientReady) {
@@ -458,22 +479,40 @@ async function runAutomation(contacts, messageBody = null, minDelay = 6, maxDela
         }
 
         const contact = contacts[i];
-        let phone = contact.phone.toString().trim();
+        const rawPhone = contact.phone.toString().trim();
         const name = contact.name || 'Recipient';
         const message = contact.message || messageBody || 'Hello!';
 
-        phone = phone.replace(/[^0-9]/g, '');
-        const whatsappId = phone.endsWith('@c.us') ? phone : `${phone}@c.us`;
+        let whatsappId;
+        let logPhone = rawPhone;
+        
+        if (rawPhone.endsWith('@g.us')) {
+            whatsappId = rawPhone;
+            logPhone = `Group: ${name}`;
+        } else if (rawPhone.endsWith('@c.us')) {
+            whatsappId = rawPhone;
+            logPhone = rawPhone.split('@')[0];
+        } else {
+            const cleanPhone = rawPhone.replace(/[^0-9]/g, '');
+            whatsappId = `${cleanPhone}@c.us`;
+            logPhone = cleanPhone;
+        }
 
-        io.emit('automation_log', { message: `[${i + 1}/${contacts.length}] Sending to ${name} (${phone})...`, type: 'info' });
+        io.emit('automation_log', { message: `[${i + 1}/${contacts.length}] Sending to ${name} (${logPhone})...`, type: 'info' });
         activeAutomation.current++;
 
         try {
-            const isRegistered = await client.isRegisteredUser(whatsappId);
-            if (!isRegistered) {
-                activeAutomation.failed++;
-                io.emit('automation_log', { message: `Skipped: ${phone} is not on WhatsApp.`, type: 'warning' });
-            } else {
+            let canSend = true;
+            if (!whatsappId.endsWith('@g.us')) {
+                const isRegistered = await client.isRegisteredUser(whatsappId);
+                if (!isRegistered) {
+                    canSend = false;
+                    activeAutomation.failed++;
+                    io.emit('automation_log', { message: `Skipped: ${logPhone} is not on WhatsApp.`, type: 'warning' });
+                }
+            }
+
+            if (canSend) {
                 await client.sendMessage(whatsappId, message);
                 activeAutomation.sent++;
                 io.emit('automation_log', { message: `Success: Message sent to ${name}.`, type: 'success' });

@@ -86,7 +86,12 @@
 
                     <!-- Tab Content: Paste -->
                     <div class="tab-content active" id="tab-paste">
-                        <p class="field-desc">Enter phone numbers (with country code, e.g., 972500000000) and message content. Format: <code>Phone|Name|Custom Message</code> (One per line). Name and message are optional.</p>
+                        <div class="field-header-row">
+                            <p class="field-desc">Enter phone numbers (with country code, e.g., 972500000000) and message content. Format: <code>Phone|Name|Custom Message</code> (One per line). Name and message are optional.</p>
+                            <button class="btn btn-secondary btn-sm" onclick="openGroupModal('paste')">
+                                <i class="fas fa-users"></i> Add Group
+                            </button>
+                        </div>
                         <textarea id="contacts-input" placeholder="972500000000|John Doe|Hi John, testing automation!&#10;972500000001|Jane Smith|Hello Jane!"></textarea>
                         
                         <div class="options-grid">
@@ -140,7 +145,12 @@
                             <span id="schedule-banner-text">Scheduler Status: Disabled</span>
                         </div>
 
-                        <p class="field-desc" style="margin-top: 1rem;">Set up an automatic daily broadcast. Format: <code>Phone|Name</code> (One per line). Name is optional.</p>
+                        <div class="field-header-row" style="margin-top: 1rem;">
+                            <p class="field-desc">Set up an automatic daily broadcast. Format: <code>Phone|Name</code> (One per line). Name is optional.</p>
+                            <button class="btn btn-secondary btn-sm" onclick="openGroupModal('schedule')">
+                                <i class="fas fa-users"></i> Add Group
+                            </button>
+                        </div>
                         <textarea id="schedule-contacts" placeholder="972500000000|John Doe&#10;972500000001|Jane Smith" style="height: 120px;"></textarea>
 
                         <div class="form-group" style="margin-bottom: 1rem;">
@@ -792,6 +802,161 @@
                 </div>
             `).join('');
         }
+
+        // Group Picker Logic
+        let activeGroupTarget = ''; // 'paste' or 'schedule'
+        let cachedGroups = [];
+
+        function openGroupModal(target) {
+            activeGroupTarget = target;
+            document.getElementById('group-modal').style.display = 'flex';
+            document.getElementById('modal-search').value = '';
+            
+            // Show loading state
+            document.getElementById('groups-loading').style.display = 'flex';
+            document.getElementById('groups-error').style.display = 'none';
+            document.getElementById('groups-empty').style.display = 'none';
+            document.getElementById('groups-list').innerHTML = '';
+
+            fetch('/api/groups')
+                .then(response => {
+                    if (!response.ok) {
+                        return response.json().then(err => { throw new Error(err.error || 'Server error') });
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    cachedGroups = data.groups || [];
+                    document.getElementById('groups-loading').style.display = 'none';
+                    renderGroups(cachedGroups);
+                })
+                .catch(err => {
+                    console.error('Error fetching groups:', err);
+                    document.getElementById('groups-loading').style.display = 'none';
+                    document.getElementById('groups-error').style.display = 'flex';
+                    document.getElementById('groups-error-msg').textContent = err.message;
+                });
+        }
+
+        function closeGroupModal() {
+            document.getElementById('group-modal').style.display = 'none';
+        }
+
+        function renderGroups(groups) {
+            const listElement = document.getElementById('groups-list');
+            listElement.innerHTML = '';
+
+            if (groups.length === 0) {
+                document.getElementById('groups-empty').style.display = 'flex';
+                return;
+            }
+
+            document.getElementById('groups-empty').style.display = 'none';
+
+            groups.forEach(group => {
+                const li = document.createElement('li');
+                li.className = 'group-item';
+                
+                const initials = group.name.substring(0, 2).toUpperCase() || 'GP';
+                
+                li.innerHTML = `
+                    <div class="group-info">
+                        <div class="group-avatar">${initials}</div>
+                        <div class="group-details">
+                            <span class="group-name">${escapeHtml(group.name)}</span>
+                            <span class="group-id">${group.id}</span>
+                        </div>
+                    </div>
+                    <span class="group-action">Select</span>
+                `;
+                
+                li.addEventListener('click', () => selectGroup(group.id, group.name));
+                listElement.appendChild(li);
+            });
+        }
+
+        function filterGroups() {
+            const query = document.getElementById('modal-search').value.toLowerCase().trim();
+            const filtered = cachedGroups.filter(g => 
+                g.name.toLowerCase().includes(query) || 
+                g.id.toLowerCase().includes(query)
+            );
+            renderGroups(filtered);
+        }
+
+        function selectGroup(groupId, groupName) {
+            let textarea;
+            if (activeGroupTarget === 'paste') {
+                textarea = document.getElementById('contacts-input');
+            } else if (activeGroupTarget === 'schedule') {
+                textarea = document.getElementById('schedule-contacts');
+            }
+
+            if (textarea) {
+                const currentValue = textarea.value.trim();
+                const newEntry = `${groupId}|${groupName}`;
+                
+                if (currentValue === '') {
+                    textarea.value = newEntry;
+                } else {
+                    textarea.value = currentValue + '\n' + newEntry;
+                }
+                
+                textarea.dispatchEvent(new Event('input'));
+            }
+            
+            closeGroupModal();
+        }
+
+        function escapeHtml(text) {
+            const map = {
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#039;'
+            };
+            return text.replace(/[&<>"']/g, function(m) { return map[m]; });
+        }
+
+        // Close modal when clicking outside of modal content
+        window.addEventListener('click', (event) => {
+            const modal = document.getElementById('group-modal');
+            if (event.target === modal) {
+                closeGroupModal();
+            }
+        });
     </script>
+
+    <!-- Group Selector Modal -->
+    <div id="group-modal" class="modal-overlay">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-users"></i> Select WhatsApp Group</h3>
+                <button class="modal-close" onclick="closeGroupModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="modal-search-wrapper">
+                    <i class="fas fa-search search-icon"></i>
+                    <input type="text" id="modal-search" placeholder="Search groups..." oninput="filterGroups()">
+                </div>
+                <div id="groups-loading" class="groups-loading-state">
+                    <div class="spinner"></div>
+                    <p>Loading WhatsApp groups...</p>
+                </div>
+                <div id="groups-error" class="groups-error-state" style="display: none;">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <p id="groups-error-msg">Failed to load groups.</p>
+                </div>
+                <div id="groups-empty" class="groups-empty-state" style="display: none;">
+                    <i class="fas fa-folder-open"></i>
+                    <p>No groups found. Make sure WhatsApp is connected and synced.</p>
+                </div>
+                <ul id="groups-list" class="groups-list">
+                    <!-- Dynamic group items will be appended here -->
+                </ul>
+            </div>
+        </div>
+    </div>
 </body>
 </html>
