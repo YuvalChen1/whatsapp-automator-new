@@ -129,6 +129,8 @@ function logReply(phone, messageText) {
 }
 
 // Helper: Clean up Puppeteer SingletonLock if it exists from a previous crash/restart
+// Note: We use a direct try-unlink approach because fs.existsSync returns false for broken symlinks,
+// which is exactly what a lingering lock file is.
 function cleanPuppeteerLock() {
     const sessionPaths = [
         path.join(DATA_DIR, 'session'),
@@ -139,11 +141,12 @@ function cleanPuppeteerLock() {
 
     sessionPaths.forEach(dir => {
         const lockPath = path.join(dir, 'SingletonLock');
-        if (fs.existsSync(lockPath)) {
-            try {
-                fs.unlinkSync(lockPath);
-                console.log(`Successfully removed Puppeteer SingletonLock at: ${lockPath}`);
-            } catch (err) {
+        try {
+            fs.unlinkSync(lockPath);
+            console.log(`Successfully removed Puppeteer SingletonLock at: ${lockPath}`);
+        } catch (err) {
+            // Ignore error if the file doesn't exist
+            if (err.code !== 'ENOENT') {
                 console.warn(`Failed to remove lock at ${lockPath}:`, err.message);
             }
         }
