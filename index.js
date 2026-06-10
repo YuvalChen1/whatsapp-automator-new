@@ -128,6 +128,31 @@ function logReply(phone, messageText) {
     io.emit('new_reply', { phone, message: messageText, time: timeStr, day: dayKey, month: monthKey });
 }
 
+// Helper: Clean up Puppeteer SingletonLock if it exists from a previous crash/restart
+function cleanPuppeteerLock() {
+    const sessionPaths = [
+        path.join(DATA_DIR, 'session'),
+        path.join(DATA_DIR, 'session', 'Default'),
+        path.join(DATA_DIR, 'session-Default'),
+        path.join(DATA_DIR, 'session-Default', 'Default')
+    ];
+
+    sessionPaths.forEach(dir => {
+        const lockPath = path.join(dir, 'SingletonLock');
+        if (fs.existsSync(lockPath)) {
+            try {
+                fs.unlinkSync(lockPath);
+                console.log(`Successfully removed Puppeteer SingletonLock at: ${lockPath}`);
+            } catch (err) {
+                console.warn(`Failed to remove lock at ${lockPath}:`, err.message);
+            }
+        }
+    });
+}
+
+// Clean up locks before starting
+cleanPuppeteerLock();
+
 // Initialize WhatsApp client
 console.log('Initializing WhatsApp Client...');
 const client = new Client({
