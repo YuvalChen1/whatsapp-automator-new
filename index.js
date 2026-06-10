@@ -1,4 +1,4 @@
-console.log('=== APP VERSION 1.0.5 (WITH STARTUP SCRIPT & AGGRESSIVE LOCK CLEANUP) ===');
+console.log('=== APP VERSION 2.0.0 (LOCAL SESSION - NO LOCK CONFLICTS) ===');
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -19,6 +19,13 @@ const DATA_DIR = process.env.DATA_DIR || __dirname;
 const SCHEDULE_FILE = path.join(DATA_DIR, 'schedule.json');
 const CHATBOT_FILE = path.join(DATA_DIR, 'chatbot_rules.json');
 const REPLIES_FILE = path.join(DATA_DIR, 'replies.json');
+
+// === NEW: Session isolation strategy ===
+// Persistent disk stores a BACKUP of the session (no Chromium lock files)
+// Chromium runs from /tmp which is container-local (never shared between containers)
+const PERSISTENT_SESSION_DIR = path.join(DATA_DIR, 'session-backup');
+const LOCAL_AUTH_DIR = '/tmp/wwebjs_auth';
+const LOCAL_SESSION_DIR = path.join(LOCAL_AUTH_DIR, 'session');
 
 // Serve static UI assets
 app.use(express.static(path.join(__dirname, 'public')));
@@ -129,45 +136,79 @@ function logReply(phone, messageText) {
     io.emit('new_reply', { phone, message: messageText, time: timeStr, day: dayKey, month: monthKey });
 }
 
-// Debug: List files in DATA_DIR on startup to trace lock files
-function debugListFiles(dir, prefix = '') {
-    if (!fs.existsSync(dir)) {
-        console.log(`${prefix} Directory does not exist: ${dir}`);
-        return;
-    }
-    try {
-        const files = fs.readdirSync(dir);
-        console.log(`${prefix} Listing ${dir}:`);
-        files.forEach(file => {
-            const fullPath = path.join(dir, file);
-            let isLink = false;
-            try {
-                const stat = fs.lstatSync(fullPath);
-                isLink = stat.isSymbolicLink();
-                if (stat.isDirectory()) {
-                    console.log(`${prefix}  [DIR] ${file}`);
-                    if (file === 'session' || file === 'session-Default' || file === 'Default') {
-                        debugListFiles(fullPath, prefix + '    ');
-                    }
-                } else {
-                    console.log(`${prefix}  [FILE] ${file} ${isLink ? '(Symlink)' : ''}`);
-                }
-            } catch (e) {
-                console.log(`${prefix}  [ERROR] ${file}: ${e.message}`);
+// ============================================================
+//  Session Copy Helpers (persistent disk <-> local /tmp)
+// ============================================================
+function copyDirSync(src, dest) {
+    fs.mkdirSync(dest, { recursive: true });
+    const entries = fs.readdirSync(src, { withFileTypes: true });
+    for (const entry of entries) {
+        const srcPath = path.join(src, entry.name);
+        const destPath = path.join(dest, entry.name);
+        // Skip lock files - never copy them
+        if (['SingletonLock', 'SingletonCookie', 'SingletonSocket'].includes(entry.name)) {
+            continue;
+        }
+        try {
+            if (entry.isDirectory()) {
+                copyDirSync(srcPath, destPath);
+            } else {
+                fs.copyFileSync(srcPath, destPath);
             }
-        });
-    } catch (e) {
-        console.log(`${prefix} Failed to read directory: ${e.message}`);
+        } catch (err) {
+            // Skip files that can't be copied (broken symlinks, etc.)
+            if (err.code !== 'ENOENT') {
+                console.warn(`  Skipping ${srcPath}: ${err.message}`);
+            }
+        }
     }
 }
 
-console.log('--- Startup Diagnostics ---');
-debugListFiles(DATA_DIR);
-console.log('---------------------------');
+function restoreSessionFromBackup() {
+    if (fs.existsSync(PERSISTENT_SESSION_DIR)) {
+        console.log(`Restoring session from persistent backup: ${PERSISTENT_SESSION_DIR}`);
+        try {
+            copyDirSync(PERSISTENT_SESSION_DIR, LOCAL_SESSION_DIR);
+            console.log(`Session restored to: ${LOCAL_SESSION_DIR}`);
+        } catch (err) {
+            console.error('Failed to restore session backup:', err.message);
+        }
+    } else {
+        console.log('No session backup found on persistent disk. Will need QR scan.');
+    }
+}
+
+function backupSessionToPersistent() {
+    if (fs.existsSync(LOCAL_SESSION_DIR)) {
+        console.log(`Backing up session to persistent disk: ${PERSISTENT_SESSION_DIR}`);
+        try {
+            // Remove old backup first
+            if (fs.existsSync(PERSISTENT_SESSION_DIR)) {
+                fs.rmSync(PERSISTENT_SESSION_DIR, { recursive: true, force: true });
+            }
+            copyDirSync(LOCAL_SESSION_DIR, PERSISTENT_SESSION_DIR);
+            console.log('Session backup complete.');
+        } catch (err) {
+            console.error('Failed to backup session:', err.message);
+        }
+    }
+}
+
+// ============================================================
+//  Startup: Restore session from persistent disk to /tmp
+// ============================================================
+console.log('--- Session Setup ---');
+fs.mkdirSync(LOCAL_AUTH_DIR, { recursive: true });
+restoreSessionFromBackup();
+
+// Client variable
+let client = null;
 
 // Graceful shutdown handler
 async function gracefulShutdown(signal) {
     console.log(`Received ${signal}. Shutting down gracefully...`);
+    // Backup session BEFORE destroying client
+    backupSessionToPersistent();
     try {
         if (client) {
             console.log('Destroying WhatsApp client...');
@@ -177,210 +218,125 @@ async function gracefulShutdown(signal) {
     } catch (err) {
         console.error('Error destroying client during shutdown:', err.message);
     }
-    // Clean up lock files on shutdown so next container starts cleanly
-    cleanAllSingletonFiles(DATA_DIR);
     process.exit(0);
 }
 
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
-// Aggressive cleanup: Recursively find and remove ALL Singleton* files
-// These include SingletonLock, SingletonCookie, SingletonSocket
-// They can be regular files OR symlinks (which fs.existsSync misses when broken)
-function cleanAllSingletonFiles(baseDir) {
-    const singletonNames = ['SingletonLock', 'SingletonCookie', 'SingletonSocket'];
-    let cleaned = 0;
-
-    function walkDir(dir) {
-        let entries;
-        try {
-            entries = fs.readdirSync(dir, { withFileTypes: true });
-        } catch (err) {
-            return; // Can't read this directory, skip
-        }
-        for (const entry of entries) {
-            const fullPath = path.join(dir, entry.name);
-            if (singletonNames.includes(entry.name)) {
-                try {
-                    fs.unlinkSync(fullPath);
-                    console.log(`Cleaned up: ${fullPath}`);
-                    cleaned++;
-                } catch (err) {
-                    if (err.code !== 'ENOENT') {
-                        console.warn(`Failed to remove ${fullPath}:`, err.message);
-                    }
-                }
-            } else if (entry.isDirectory()) {
-                walkDir(fullPath);
-            }
-        }
-    }
-
-    if (fs.existsSync(baseDir)) {
-        walkDir(baseDir);
-    }
-    console.log(`Singleton cleanup complete. Removed ${cleaned} file(s).`);
-}
-
-// Clean up locks before starting the client
-console.log('--- Cleaning Singleton Lock Files ---');
-cleanAllSingletonFiles(DATA_DIR);
-
-// Client variable - will be set by initializeWithRetry
-let client = null;
-
-// Create a fresh WhatsApp client instance
-function createClient() {
-    return new Client({
-        authStrategy: new LocalAuth({
-            dataPath: DATA_DIR
-        }),
-        puppeteer: {
-            headless: true,
-            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-            args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-accelerated-2d-canvas',
-                '--no-first-run',
-                '--no-zygote',
-                '--single-process',
-                '--disable-gpu'
-            ]
-        }
-    });
-}
-
-// Wire up all event listeners on a client instance
-function setupClientListeners(c) {
-    c.on('qr', async (qr) => {
-        console.log('QR Code received, converting for Web UI...');
-        qrcodeTerminal.generate(qr, { small: true });
-        
-        try {
-            const qrUrl = await qrcode.toDataURL(qr);
-            lastQrCodeData = qrUrl;
-            whatsappClientReady = false;
-            io.emit('qr', qrUrl);
-        } catch (err) {
-            console.error('Failed to generate QR data URL:', err.message);
-        }
-    });
-
-    c.on('authenticated', () => {
-        console.log('WhatsApp Authenticated!');
-        lastQrCodeData = null;
-        io.emit('authenticated');
-    });
-
-    c.on('auth_failure', (msg) => {
-        console.error('WhatsApp Authentication Failure:', msg);
-        io.emit('automation_log', { message: `Auth Failure: ${msg}`, type: 'error' });
-    });
-
-    c.on('ready', () => {
-        console.log('WhatsApp Client Ready!');
-        whatsappClientReady = true;
-        lastQrCodeData = null;
-        io.emit('ready');
-    });
-
-    c.on('disconnected', (reason) => {
-        console.log('WhatsApp Client Disconnected:', reason);
-        whatsappClientReady = false;
-        lastQrCodeData = null;
-        io.emit('disconnected');
-    });
-
-    // Incoming message listener (for Chatbot Auto-Replies & Reply Tracking)
-    c.on('message', async (msg) => {
-        // Ignore group chats
-        if (msg.from.endsWith('@g.us')) return;
-
-        const phone = msg.from.split('@')[0];
-        const incomingText = msg.body.trim().toLowerCase();
-        console.log(`Received message from ${msg.from}: "${msg.body}"`);
-
-        // --- Log every incoming reply for the Excel report ---
-        logReply(phone, msg.body.trim());
-
-        // Check if chatbot is enabled before processing rules
-        if (!chatbotConfig.enabled) return;
-
-        // Scan through our triggers
-        for (const rule of chatbotConfig.rules) {
-            if (!rule.trigger || !rule.reply) continue;
-
-            // Split triggers by comma (e.g. "1,fine,good" -> ["1", "fine", "good"])
-            const triggers = rule.trigger.split(',').map(t => t.trim().toLowerCase());
-            
-            if (triggers.includes(incomingText)) {
-                console.log(`Matched trigger "${incomingText}". Replying with: "${rule.reply}"`);
-                
-                try {
-                    // Reply directly (quotes their message)
-                    await msg.reply(rule.reply);
-
-                    // Stream log to Dashboard
-                    io.emit('automation_log', { 
-                        message: `🤖 Auto-replied to +${phone} (Matched: "${incomingText}") -> "${rule.reply}"`, 
-                        type: 'success' 
-                    });
-                } catch (err) {
-                    console.error('Failed to send auto-reply:', err.message);
-                    io.emit('automation_log', { 
-                        message: `⚠️ Failed to send auto-reply to +${phone}: ${err.message}`, 
-                        type: 'error' 
-                    });
-                }
-                break; // Stop evaluating rules after first match
-            }
-        }
-    });
-}
-
-// Initialize with retry logic to handle Render rolling deployments
-// When Render deploys, the old container may still be running with Chromium holding the lock.
-// We retry with increasing delays to wait for the old container to shut down.
-async function initializeWithRetry(maxRetries = 5) {
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-        // Clean all singleton files before each attempt
-        console.log(`\n--- Initialization attempt ${attempt}/${maxRetries} ---`);
-        cleanAllSingletonFiles(DATA_DIR);
-
-        // Create a fresh client for each attempt
-        client = createClient();
-        setupClientListeners(client);
-
-        try {
-            await client.initialize();
-            console.log('Client initialized successfully!');
-            return; // Success - exit the retry loop
-        } catch (err) {
-            console.error(`Attempt ${attempt} failed: ${err.message}`);
-            
-            // Try to destroy the failed client
-            try { await client.destroy(); } catch (_) { /* ignore */ }
-            client = null;
-
-            if (attempt < maxRetries) {
-                const waitSec = attempt * 10; // 10s, 20s, 30s, 40s
-                console.log(`Waiting ${waitSec}s before retry (old container may still be running)...`);
-                await new Promise(r => setTimeout(r, waitSec * 1000));
-            } else {
-                console.error('=== All initialization attempts failed ===');
-                console.error('The persistent disk lock could not be cleared.');
-                console.error('Try manually restarting the Render service.');
-            }
-        }
-    }
-}
-
-// Start initialization with retry
+// Create the WhatsApp client - Chromium runs from LOCAL /tmp directory
 console.log('Initializing WhatsApp Client...');
-initializeWithRetry();
+client = new Client({
+    authStrategy: new LocalAuth({
+        dataPath: LOCAL_AUTH_DIR  // /tmp/wwebjs_auth - container-local, no lock conflicts!
+    }),
+    puppeteer: {
+        headless: true,
+        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--single-process',
+            '--disable-gpu'
+        ]
+    }
+});
+
+// WhatsApp Event Listeners
+client.on('qr', async (qr) => {
+    console.log('QR Code received, converting for Web UI...');
+    qrcodeTerminal.generate(qr, { small: true });
+    
+    try {
+        const qrUrl = await qrcode.toDataURL(qr);
+        lastQrCodeData = qrUrl;
+        whatsappClientReady = false;
+        io.emit('qr', qrUrl);
+    } catch (err) {
+        console.error('Failed to generate QR data URL:', err.message);
+    }
+});
+
+client.on('authenticated', () => {
+    console.log('WhatsApp Authenticated!');
+    lastQrCodeData = null;
+    io.emit('authenticated');
+    // Backup session right after successful authentication
+    backupSessionToPersistent();
+});
+
+client.on('auth_failure', (msg) => {
+    console.error('WhatsApp Authentication Failure:', msg);
+    io.emit('automation_log', { message: `Auth Failure: ${msg}`, type: 'error' });
+});
+
+client.on('ready', () => {
+    console.log('WhatsApp Client Ready!');
+    whatsappClientReady = true;
+    lastQrCodeData = null;
+    io.emit('ready');
+    // Also backup when client is fully ready
+    backupSessionToPersistent();
+});
+
+client.on('disconnected', (reason) => {
+    console.log('WhatsApp Client Disconnected:', reason);
+    whatsappClientReady = false;
+    lastQrCodeData = null;
+    io.emit('disconnected');
+});
+
+// Incoming message listener (for Chatbot Auto-Replies & Reply Tracking)
+client.on('message', async (msg) => {
+    // Ignore group chats
+    if (msg.from.endsWith('@g.us')) return;
+
+    const phone = msg.from.split('@')[0];
+    const incomingText = msg.body.trim().toLowerCase();
+    console.log(`Received message from ${msg.from}: "${msg.body}"`);
+
+    // --- Log every incoming reply for the Excel report ---
+    logReply(phone, msg.body.trim());
+
+    // Check if chatbot is enabled before processing rules
+    if (!chatbotConfig.enabled) return;
+
+    // Scan through our triggers
+    for (const rule of chatbotConfig.rules) {
+        if (!rule.trigger || !rule.reply) continue;
+
+        // Split triggers by comma (e.g. "1,fine,good" -> ["1", "fine", "good"])
+        const triggers = rule.trigger.split(',').map(t => t.trim().toLowerCase());
+        
+        if (triggers.includes(incomingText)) {
+            console.log(`Matched trigger "${incomingText}". Replying with: "${rule.reply}"`);
+            
+            try {
+                // Reply directly (quotes their message)
+                await msg.reply(rule.reply);
+
+                // Stream log to Dashboard
+                io.emit('automation_log', { 
+                    message: `🤖 Auto-replied to +${phone} (Matched: "${incomingText}") -> "${rule.reply}"`, 
+                    type: 'success' 
+                });
+            } catch (err) {
+                console.error('Failed to send auto-reply:', err.message);
+                io.emit('automation_log', { 
+                    message: `⚠️ Failed to send auto-reply to +${phone}: ${err.message}`, 
+                    type: 'error' 
+                });
+            }
+            break; // Stop evaluating rules after first match
+        }
+    }
+});
+
+client.initialize();
 
 // ============================================================
 //  Express route: Download monthly Excel report
