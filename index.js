@@ -36,11 +36,15 @@ const SESSION_TOKEN = Buffer.from(`${AUTH_USER}:${AUTH_PASS}`).toString('base64'
 
 function getSessionCookie(req) {
     if (!req.headers.cookie) return null;
-    const cookies = req.headers.cookie.split(';').reduce((acc, cookie) => {
-        const [key, val] = cookie.trim().split('=');
-        if (key && val) acc[key] = val;
-        return acc;
-    }, {});
+    const cookies = {};
+    req.headers.cookie.split(';').forEach(c => {
+        const idx = c.indexOf('=');
+        if (idx !== -1) {
+            const key = c.substring(0, idx).trim();
+            const val = c.substring(idx + 1).trim();
+            cookies[key] = val;
+        }
+    });
     return cookies['auth_session'];
 }
 
@@ -833,11 +837,15 @@ io.use((socket, next) => {
     if (!cookieHeader) {
         return next(new Error('Authentication error: No cookies found'));
     }
-    const cookies = cookieHeader.split(';').reduce((acc, cookie) => {
-        const [key, val] = cookie.trim().split('=');
-        if (key && val) acc[key] = val;
-        return acc;
-    }, {});
+    const cookies = {};
+    cookieHeader.split(';').forEach(c => {
+        const idx = c.indexOf('=');
+        if (idx !== -1) {
+            const key = c.substring(0, idx).trim();
+            const val = c.substring(idx + 1).trim();
+            cookies[key] = val;
+        }
+    });
     const session = cookies['auth_session'];
     if (session === SESSION_TOKEN) {
         return next();
