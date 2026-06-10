@@ -551,7 +551,8 @@
                 enabled: isScheduleActive,
                 time: scheduleTime.value,
                 contacts: contacts,
-                message: scheduleMessage.value.trim()
+                message: scheduleMessage.value.trim(),
+                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
             };
 
             socket.emit('save_schedule', config);

@@ -751,7 +751,8 @@ function applySchedule() {
     }
 
     const cronExpression = `${minute} ${hour} * * *`;
-    console.log(`Scheduling daily cron job: ${cronExpression} (at ${scheduleConfig.time})`);
+    const tz = scheduleConfig.timezone || 'UTC';
+    console.log(`Scheduling daily cron job: ${cronExpression} (at ${scheduleConfig.time} in timezone ${tz})`);
 
     currentCronJob = cron.schedule(cronExpression, () => {
         console.log('Daily scheduled automation triggered!');
@@ -762,6 +763,9 @@ function applySchedule() {
         } else {
             io.emit('automation_log', { message: 'Schedule triggered, but contacts list is empty!', type: 'error' });
         }
+    }, {
+        scheduled: true,
+        timezone: tz
     });
 }
 
@@ -788,7 +792,8 @@ io.on('connection', (socket) => {
             enabled: config.enabled,
             time: config.time || '07:00',
             contacts: config.contacts || [],
-            message: config.message || ''
+            message: config.message || '',
+            timezone: config.timezone || 'UTC'
         };
 
         try {
