@@ -233,137 +233,158 @@ process.on('unhandledRejection', (reason) => {
 });
 
 // Create the WhatsApp client - Chromium runs from LOCAL /tmp directory
-console.log('Initializing WhatsApp Client...');
-client = new Client({
-    authStrategy: new LocalAuth({
-        dataPath: LOCAL_AUTH_DIR  // /tmp/wwebjs_auth - container-local, no lock conflicts!
-    }),
-    puppeteer: {
-        headless: true,
-        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-        args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-accelerated-2d-canvas',
-            '--no-first-run',
-            '--disable-gpu',
-            // Single-process mode saves ~150MB RAM (safe now that locks run from /tmp)
-            '--single-process',
-            '--no-zygote',
-            // Aggressive memory reduction
-            '--renderer-process-limit=1',
-            '--disable-features=site-per-process',
-            '--disable-extensions',
-            '--disable-background-networking',
-            '--disable-default-apps',
-            '--disable-translate',
-            '--disable-sync',
-            '--disable-notifications',
-            '--disable-component-update',
-            '--disable-domain-reliability',
-            '--disable-print-preview',
-            '--disable-speech-api',
-            '--metrics-recording-only',
-            '--no-default-browser-check',
-            '--disk-cache-size=0',
-            '--media-cache-size=0',
-            '--js-flags=--max-old-space-size=128'
-        ]
-    }
-});
-
-// WhatsApp Event Listeners
-client.on('qr', async (qr) => {
-    console.log('QR Code received, converting for Web UI...');
-    qrcodeTerminal.generate(qr, { small: true });
-    
-    try {
-        const qrUrl = await qrcode.toDataURL(qr);
-        lastQrCodeData = qrUrl;
-        whatsappClientReady = false;
-        io.emit('qr', qrUrl);
-    } catch (err) {
-        console.error('Failed to generate QR data URL:', err.message);
-    }
-});
-
-client.on('authenticated', () => {
-    console.log('WhatsApp Authenticated!');
-    lastQrCodeData = null;
-    io.emit('authenticated');
-    // Backup session right after successful authentication
-    backupSessionToPersistent();
-});
-
-client.on('auth_failure', (msg) => {
-    console.error('WhatsApp Authentication Failure:', msg);
-    io.emit('automation_log', { message: `Auth Failure: ${msg}`, type: 'error' });
-});
-
-client.on('ready', () => {
-    console.log('WhatsApp Client Ready!');
-    whatsappClientReady = true;
-    lastQrCodeData = null;
-    io.emit('ready');
-    // Also backup when client is fully ready
-    backupSessionToPersistent();
-});
-
-client.on('disconnected', (reason) => {
-    console.log('WhatsApp Client Disconnected:', reason);
+function initializeWhatsAppClient() {
     whatsappClientReady = false;
     lastQrCodeData = null;
-    io.emit('disconnected');
-});
+    io.emit('disconnected'); // Reset UI status
 
-// Incoming message listener (for Chatbot Auto-Replies & Reply Tracking)
-client.on('message', async (msg) => {
-    // Ignore group chats
-    if (msg.from.endsWith('@g.us')) return;
-
-    const phone = msg.from.split('@')[0];
-    const incomingText = msg.body.trim().toLowerCase();
-    console.log(`Received message from ${msg.from}: "${msg.body}"`);
-
-    // --- Log every incoming reply for the Excel report ---
-    logReply(phone, msg.body.trim());
-
-    // Check if chatbot is enabled before processing rules
-    if (!chatbotConfig.enabled) return;
-
-    // Scan through our triggers
-    for (const rule of chatbotConfig.rules) {
-        if (!rule.trigger || !rule.reply) continue;
-
-        // Split triggers by comma (e.g. "1,fine,good" -> ["1", "fine", "good"])
-        const triggers = rule.trigger.split(',').map(t => t.trim().toLowerCase());
-        
-        if (triggers.includes(incomingText)) {
-            console.log(`Matched trigger "${incomingText}". Replying with: "${rule.reply}"`);
-            
-            try {
-                // Reply directly (quotes their message)
-                await msg.reply(rule.reply);
-
-                // Stream log to Dashboard
-                io.emit('automation_log', { 
-                    message: `🤖 Auto-replied to +${phone} (Matched: "${incomingText}") -> "${rule.reply}"`, 
-                    type: 'success' 
-                });
-            } catch (err) {
-                console.error('Failed to send auto-reply:', err.message);
-                io.emit('automation_log', { 
-                    message: `⚠️ Failed to send auto-reply to +${phone}: ${err.message}`, 
-                    type: 'error' 
-                });
-            }
-            break; // Stop evaluating rules after first match
+    if (client) {
+        console.log('Client already exists. Destroying first...');
+        try {
+            client.destroy().catch(err => console.error('Error in client.destroy catch:', err.message));
+        } catch (err) {
+            console.error('Error destroying client:', err.message);
         }
     }
-});
 
-client.initialize();
+    console.log('Initializing WhatsApp Client...');
+    client = new Client({
+        authStrategy: new LocalAuth({
+            dataPath: LOCAL_AUTH_DIR  // /tmp/wwebjs_auth - container-local, no lock conflicts!
+        }),
+        puppeteer: {
+            headless: true,
+            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-accelerated-2d-canvas',
+                '--no-first-run',
+                '--disable-gpu',
+                // Single-process mode saves ~150MB RAM (safe now that locks run from /tmp)
+                '--single-process',
+                '--no-zygote',
+                // Aggressive memory reduction
+                '--renderer-process-limit=1',
+                '--disable-features=site-per-process',
+                '--disable-extensions',
+                '--disable-background-networking',
+                '--disable-default-apps',
+                '--disable-translate',
+                '--disable-sync',
+                '--disable-notifications',
+                '--disable-component-update',
+                '--disable-domain-reliability',
+                '--disable-print-preview',
+                '--disable-speech-api',
+                '--metrics-recording-only',
+                '--no-default-browser-check',
+                '--disk-cache-size=0',
+                '--media-cache-size=0',
+                '--js-flags=--max-old-space-size=128'
+            ]
+        }
+    });
+
+    // WhatsApp Event Listeners
+    client.on('qr', async (qr) => {
+        console.log('QR Code received, converting for Web UI...');
+        qrcodeTerminal.generate(qr, { small: true });
+        
+        try {
+            const qrUrl = await qrcode.toDataURL(qr);
+            lastQrCodeData = qrUrl;
+            whatsappClientReady = false;
+            io.emit('qr', qrUrl);
+        } catch (err) {
+            console.error('Failed to generate QR data URL:', err.message);
+        }
+    });
+
+    client.on('authenticated', () => {
+        console.log('WhatsApp Authenticated!');
+        lastQrCodeData = null;
+        io.emit('authenticated');
+        // Backup session right after successful authentication
+        backupSessionToPersistent();
+    });
+
+    client.on('auth_failure', (msg) => {
+        console.error('WhatsApp Authentication Failure:', msg);
+        io.emit('automation_log', { message: `Auth Failure: ${msg}`, type: 'error' });
+    });
+
+    client.on('ready', () => {
+        console.log('WhatsApp Client Ready!');
+        whatsappClientReady = true;
+        lastQrCodeData = null;
+        io.emit('ready');
+        // Also backup when client is fully ready
+        backupSessionToPersistent();
+    });
+
+    client.on('disconnected', (reason) => {
+        console.log('WhatsApp Client Disconnected:', reason);
+        whatsappClientReady = false;
+        lastQrCodeData = null;
+        io.emit('disconnected');
+    });
+
+    // Incoming message listener (for Chatbot Auto-Replies & Reply Tracking)
+    client.on('message', async (msg) => {
+        // Ignore group chats
+        if (msg.from.endsWith('@g.us')) return;
+
+        const phone = msg.from.split('@')[0];
+        const incomingText = msg.body.trim().toLowerCase();
+        console.log(`Received message from ${msg.from}: "${msg.body}"`);
+
+        // --- Log every incoming reply for the Excel report ---
+        logReply(phone, msg.body.trim());
+
+        // Check if chatbot is enabled before processing rules
+        if (!chatbotConfig.enabled) return;
+
+        // Scan through our triggers
+        for (const rule of chatbotConfig.rules) {
+            if (!rule.trigger || !rule.reply) continue;
+
+            // Split triggers by comma (e.g. "1,fine,good" -> ["1", "fine", "good"])
+            const triggers = rule.trigger.split(',').map(t => t.trim().toLowerCase());
+            
+            if (triggers.includes(incomingText)) {
+                console.log(`Matched trigger "${incomingText}". Replying with: "${rule.reply}"`);
+                
+                try {
+                    // Reply directly (quotes their message)
+                    await msg.reply(rule.reply);
+
+                    // Stream log to Dashboard
+                    io.emit('automation_log', { 
+                        message: `🤖 Auto-replied to +${phone} (Matched: "${incomingText}") -> "${rule.reply}"`, 
+                        type: 'success' 
+                    });
+                } catch (err) {
+                    console.error('Failed to send auto-reply:', err.message);
+                    io.emit('automation_log', { 
+                        message: `⚠️ Failed to send auto-reply to +${phone}: ${err.message}`, 
+                        type: 'error' 
+                    });
+                }
+                break; // Stop evaluating rules after first match
+            }
+        }
+    });
+
+    client.initialize().catch(err => {
+        console.error('Failed to initialize client:', err.message);
+        io.emit('automation_log', { message: `❌ Initialization failed: ${err.message}`, type: 'error' });
+    });
+}
+
+// Initial client startup
+initializeWhatsAppClient();
 
 // ============================================================
 //  Express route: Download monthly Excel report
@@ -508,6 +529,33 @@ app.get('/download-report', async (req, res) => {
     } catch (err) {
         console.error('Error generating Excel report:', err.message);
         res.status(500).json({ error: 'Failed to generate report: ' + err.message });
+    }
+});
+
+// API route: get system diagnostics status
+app.get('/api/status', (req, res) => {
+    const memory = process.memoryUsage();
+    res.json({
+        ready: whatsappClientReady,
+        hasQr: lastQrCodeData !== null,
+        uptime: Math.round(process.uptime()),
+        memory: {
+            heapUsed: Math.round(memory.heapUsed / 1024 / 1024) + ' MB',
+            rss: Math.round(memory.rss / 1024 / 1024) + ' MB'
+        },
+        clientState: client ? 'Initialized' : 'Not Initialized'
+    });
+});
+
+// API route: manually restart/refresh the WhatsApp client
+app.post('/api/restart-client', (req, res) => {
+    console.log('Manual request received via REST API to restart WhatsApp client...');
+    try {
+        initializeWhatsAppClient();
+        res.json({ success: true, message: 'WhatsApp client restart initiated.' });
+    } catch (err) {
+        console.error('Failed to trigger manual restart:', err.message);
+        res.status(500).json({ error: err.message });
     }
 });
 

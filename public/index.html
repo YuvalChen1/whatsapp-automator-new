@@ -66,6 +66,19 @@
                         <li>Point your phone's camera at the QR code above.</li>
                     </ol>
                 </div>
+
+                <div class="diagnostics-panel" style="margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid var(--border-color);">
+                    <h3 style="font-size: 0.95rem; margin-bottom: 0.75rem; color: var(--text-primary); display: flex; align-items: center; gap: 0.5rem;">
+                        <i class="fas fa-tools" style="color: var(--primary);"></i> Diagnostics & Troubleshoot
+                    </h3>
+                    <div class="diag-info" style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 1rem; line-height: 1.5;">
+                        <div>Server Uptime: <span id="diag-uptime" style="color: var(--text-primary); font-weight: 500;">Loading...</span></div>
+                        <div>Node Memory (RSS): <span id="diag-memory" style="color: var(--text-primary); font-weight: 500;">Loading...</span></div>
+                    </div>
+                    <button class="btn btn-secondary btn-sm btn-block" id="btn-restart-client" style="font-size: 0.8rem; padding: 0.5rem; display: flex; align-items: center; justify-content: center; gap: 0.5rem;">
+                        <i class="fas fa-sync-alt" id="restart-icon"></i> Restart WhatsApp Client
+                    </button>
+                </div>
             </section>
 
             <!-- Right Panel: Automation Console -->
@@ -323,6 +336,12 @@
         const progressSection = document.getElementById('progress-section');
         const consoleLog = document.getElementById('console-log');
         const btnClearLogs = document.getElementById('btn-clear-logs');
+        
+        // Diagnostics Elements
+        const diagUptime = document.getElementById('diag-uptime');
+        const diagMemory = document.getElementById('diag-memory');
+        const btnRestartClient = document.getElementById('btn-restart-client');
+        const restartIcon = document.getElementById('restart-icon');
         
         // Scheduler Elements
         const scheduleContacts = document.getElementById('schedule-contacts');
@@ -711,6 +730,66 @@
         btnLogout.addEventListener('click', () => {
             if (confirm('Are you sure you want to disconnect WhatsApp?')) {
                 socket.emit('logout');
+            }
+        });
+
+        // Poll status function
+        async function fetchDiagnostics() {
+            try {
+                const res = await fetch('/api/status');
+                if (!res.ok) throw new Error('Status request failed');
+                const data = await res.json();
+                
+                // Format uptime (seconds to friendly string)
+                let uptimeText = '';
+                const uptimeSec = data.uptime;
+                if (uptimeSec < 60) {
+                    uptimeText = `${uptimeSec}s`;
+                } else if (uptimeSec < 3600) {
+                    uptimeText = `${Math.floor(uptimeSec / 60)}m ${uptimeSec % 60}s`;
+                } else {
+                    uptimeText = `${Math.floor(uptimeSec / 3600)}h ${Math.floor((uptimeSec % 3600) / 60)}m`;
+                }
+                
+                diagUptime.textContent = uptimeText;
+                diagMemory.textContent = data.memory ? `${data.memory.rss}` : 'N/A';
+            } catch (err) {
+                console.error('Failed to fetch diagnostics:', err);
+                diagUptime.textContent = 'Offline';
+                diagMemory.textContent = 'Offline';
+            }
+        }
+
+        // Start polling diagnostics
+        fetchDiagnostics();
+        setInterval(fetchDiagnostics, 5000);
+
+        // Restart client handler
+        btnRestartClient.addEventListener('click', async () => {
+            if (!confirm('Are you sure you want to restart the WhatsApp client? This will reload the browser and clear current auth cache.')) {
+                return;
+            }
+
+            btnRestartClient.disabled = true;
+            restartIcon.classList.add('fa-spin');
+            addLog('Requesting WhatsApp client restart...', 'info');
+
+            try {
+                const res = await fetch('/api/restart-client', { method: 'POST' });
+                const data = await res.json();
+                if (data.success) {
+                    addLog('WhatsApp client restart initiated. Please wait...', 'success');
+                } else {
+                    throw new Error(data.error || 'Failed to restart');
+                }
+            } catch (err) {
+                console.error('Failed to restart client:', err);
+                addLog(`⚠️ Restart failed: ${err.message}`, 'error');
+            } finally {
+                setTimeout(() => {
+                    btnRestartClient.disabled = false;
+                    restartIcon.classList.remove('fa-spin');
+                }, 3000);
             }
         });
 
