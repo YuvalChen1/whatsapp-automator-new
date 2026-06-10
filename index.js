@@ -1,3 +1,4 @@
+console.log('=== APP VERSION 1.0.4 (WITH SHUTDOWN HANDLERS & DIAGNOSTICS) ===');
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
