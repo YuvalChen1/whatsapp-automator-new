@@ -248,14 +248,27 @@ client = new Client({
             '--disable-accelerated-2d-canvas',
             '--no-first-run',
             '--disable-gpu',
+            // Single-process mode saves ~150MB RAM (safe now that locks run from /tmp)
+            '--single-process',
+            '--no-zygote',
+            // Aggressive memory reduction
+            '--renderer-process-limit=1',
+            '--disable-features=site-per-process',
             '--disable-extensions',
             '--disable-background-networking',
             '--disable-default-apps',
             '--disable-translate',
             '--disable-sync',
+            '--disable-notifications',
+            '--disable-component-update',
+            '--disable-domain-reliability',
+            '--disable-print-preview',
+            '--disable-speech-api',
             '--metrics-recording-only',
             '--no-default-browser-check',
-            '--js-flags=--max-old-space-size=256'
+            '--disk-cache-size=0',
+            '--media-cache-size=0',
+            '--js-flags=--max-old-space-size=128'
         ]
     }
 });

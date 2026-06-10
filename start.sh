@@ -11,4 +11,6 @@ sleep 1
 rm -rf /tmp/wwebjs_auth 2>/dev/null || true
 
 echo "Cleanup complete. Starting Node.js..."
-exec node index.js
+
+# Limit Node.js memory to 256MB (Chromium gets the rest of the 512MB)
+exec node --max-old-space-size=256 index.js
