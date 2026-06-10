@@ -398,15 +398,15 @@ function initializeWhatsAppClient() {
 
     // Incoming message listener (for Chatbot Auto-Replies & Reply Tracking)
     client.on('message', async (msg) => {
-        // Ignore group chats
-        if (msg.from.endsWith('@g.us')) return;
-
-        const phone = msg.from.split('@')[0];
+        const isGroup = msg.from.endsWith('@g.us');
+        // Get the participant's JID if in a group, otherwise the sender JID
+        const sender = isGroup ? (msg.author || msg.from) : msg.from;
+        const phone = sender.split('@')[0];
         const incomingText = msg.body.trim().toLowerCase();
-        console.log(`Received message from ${msg.from}: "${msg.body}"`);
+        console.log(`Received message from ${isGroup ? 'group ' + msg.from + ' (author: ' + sender + ')' : msg.from}: "${msg.body}"`);
 
         // --- Log every incoming reply for the Excel report ---
-        logReply(phone, msg.body.trim());
+        logReply(phone, isGroup ? `[Group Chat] ${msg.body.trim()}` : msg.body.trim());
 
         // Check if chatbot is enabled before processing rules
         if (!chatbotConfig.enabled) return;
