@@ -1,4 +1,4 @@
-console.log('=== APP VERSION 1.0.4 (WITH SHUTDOWN HANDLERS & DIAGNOSTICS) ===');
+console.log('=== APP VERSION 1.0.5 (WITH STARTUP SCRIPT & AGGRESSIVE LOCK CLEANUP) ===');
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -177,39 +177,55 @@ async function gracefulShutdown(signal) {
     } catch (err) {
         console.error('Error destroying client during shutdown:', err.message);
     }
+    // Clean up lock files on shutdown so next container starts cleanly
+    cleanAllSingletonFiles(DATA_DIR);
     process.exit(0);
 }
 
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
-// Helper: Clean up Puppeteer SingletonLock if it exists from a previous crash/restart
-// Note: We use a direct try-unlink approach because fs.existsSync returns false for broken symlinks,
-// which is exactly what a lingering lock file is.
-function cleanPuppeteerLock() {
-    const sessionPaths = [
-        path.join(DATA_DIR, 'session'),
-        path.join(DATA_DIR, 'session', 'Default'),
-        path.join(DATA_DIR, 'session-Default'),
-        path.join(DATA_DIR, 'session-Default', 'Default')
-    ];
+// Aggressive cleanup: Recursively find and remove ALL Singleton* files
+// These include SingletonLock, SingletonCookie, SingletonSocket
+// They can be regular files OR symlinks (which fs.existsSync misses when broken)
+function cleanAllSingletonFiles(baseDir) {
+    const singletonNames = ['SingletonLock', 'SingletonCookie', 'SingletonSocket'];
+    let cleaned = 0;
 
-    sessionPaths.forEach(dir => {
-        const lockPath = path.join(dir, 'SingletonLock');
+    function walkDir(dir) {
+        let entries;
         try {
-            fs.unlinkSync(lockPath);
-            console.log(`Successfully removed Puppeteer SingletonLock at: ${lockPath}`);
+            entries = fs.readdirSync(dir, { withFileTypes: true });
         } catch (err) {
-            // Ignore error if the file doesn't exist
-            if (err.code !== 'ENOENT') {
-                console.warn(`Failed to remove lock at ${lockPath}:`, err.message);
+            return; // Can't read this directory, skip
+        }
+        for (const entry of entries) {
+            const fullPath = path.join(dir, entry.name);
+            if (singletonNames.includes(entry.name)) {
+                try {
+                    fs.unlinkSync(fullPath);
+                    console.log(`Cleaned up: ${fullPath}`);
+                    cleaned++;
+                } catch (err) {
+                    if (err.code !== 'ENOENT') {
+                        console.warn(`Failed to remove ${fullPath}:`, err.message);
+                    }
+                }
+            } else if (entry.isDirectory()) {
+                walkDir(fullPath);
             }
         }
-    });
+    }
+
+    if (fs.existsSync(baseDir)) {
+        walkDir(baseDir);
+    }
+    console.log(`Singleton cleanup complete. Removed ${cleaned} file(s).`);
 }
 
-// Clean up locks before starting
-cleanPuppeteerLock();
+// Clean up locks before starting the client
+console.log('--- Cleaning Singleton Lock Files ---');
+cleanAllSingletonFiles(DATA_DIR);
 
 // Initialize WhatsApp client
 console.log('Initializing WhatsApp Client...');

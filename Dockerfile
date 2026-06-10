@@ -1,8 +1,9 @@
 FROM node:20-slim
 
-# Install system dependencies for Chromium
+# Install system dependencies for Chromium + procps (for pkill in start.sh)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     chromium \
+    procps \
     fonts-liberation \
     libasound2 \
     libatk-bridge2.0-0 \
@@ -33,6 +34,9 @@ RUN npm install
 
 COPY . .
 
+# Make startup script executable
+RUN chmod +x start.sh
+
 # Create the data directory (Render persistent disk will be mounted here)
 RUN mkdir -p /app/data
 
@@ -42,4 +46,5 @@ ENV PORT=3000
 
 EXPOSE 3000
 
-CMD ["node", "index.js"]
+# Use the startup script which cleans locks before starting Node
+CMD ["./start.sh"]
