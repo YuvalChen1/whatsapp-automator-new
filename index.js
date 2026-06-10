@@ -227,117 +227,160 @@ function cleanAllSingletonFiles(baseDir) {
 console.log('--- Cleaning Singleton Lock Files ---');
 cleanAllSingletonFiles(DATA_DIR);
 
-// Initialize WhatsApp client
-console.log('Initializing WhatsApp Client...');
-const client = new Client({
-    authStrategy: new LocalAuth({
-        dataPath: DATA_DIR
-    }),
-    puppeteer: {
-        headless: true,
-        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-        args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-accelerated-2d-canvas',
-            '--no-first-run',
-            '--no-zygote',
-            '--single-process',
-            '--disable-gpu'
-        ]
-    }
-});
+// Client variable - will be set by initializeWithRetry
+let client = null;
 
-// WhatsApp Event Listeners
-client.on('qr', async (qr) => {
-    console.log('QR Code received, converting for Web UI...');
-    qrcodeTerminal.generate(qr, { small: true });
-    
-    try {
-        const qrUrl = await qrcode.toDataURL(qr);
-        lastQrCodeData = qrUrl;
-        whatsappClientReady = false;
-        io.emit('qr', qrUrl);
-    } catch (err) {
-        console.error('Failed to generate QR data URL:', err.message);
-    }
-});
+// Create a fresh WhatsApp client instance
+function createClient() {
+    return new Client({
+        authStrategy: new LocalAuth({
+            dataPath: DATA_DIR
+        }),
+        puppeteer: {
+            headless: true,
+            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-accelerated-2d-canvas',
+                '--no-first-run',
+                '--no-zygote',
+                '--single-process',
+                '--disable-gpu'
+            ]
+        }
+    });
+}
 
-client.on('authenticated', () => {
-    console.log('WhatsApp Authenticated!');
-    lastQrCodeData = null;
-    io.emit('authenticated');
-});
-
-client.on('auth_failure', (msg) => {
-    console.error('WhatsApp Authentication Failure:', msg);
-    io.emit('automation_log', { message: `Auth Failure: ${msg}`, type: 'error' });
-});
-
-client.on('ready', () => {
-    console.log('WhatsApp Client Ready!');
-    whatsappClientReady = true;
-    lastQrCodeData = null;
-    io.emit('ready');
-});
-
-client.on('disconnected', (reason) => {
-    console.log('WhatsApp Client Disconnected:', reason);
-    whatsappClientReady = false;
-    lastQrCodeData = null;
-    io.emit('disconnected');
-});
-
-// Incoming message listener (for Chatbot Auto-Replies & Reply Tracking)
-client.on('message', async (msg) => {
-    // Ignore group chats
-    if (msg.from.endsWith('@g.us')) return;
-
-    const phone = msg.from.split('@')[0];
-    const incomingText = msg.body.trim().toLowerCase();
-    console.log(`Received message from ${msg.from}: "${msg.body}"`);
-
-    // --- Log every incoming reply for the Excel report ---
-    logReply(phone, msg.body.trim());
-
-    // Check if chatbot is enabled before processing rules
-    if (!chatbotConfig.enabled) return;
-
-    // Scan through our triggers
-    for (const rule of chatbotConfig.rules) {
-        if (!rule.trigger || !rule.reply) continue;
-
-        // Split triggers by comma (e.g. "1,fine,good" -> ["1", "fine", "good"])
-        const triggers = rule.trigger.split(',').map(t => t.trim().toLowerCase());
+// Wire up all event listeners on a client instance
+function setupClientListeners(c) {
+    c.on('qr', async (qr) => {
+        console.log('QR Code received, converting for Web UI...');
+        qrcodeTerminal.generate(qr, { small: true });
         
-        if (triggers.includes(incomingText)) {
-            console.log(`Matched trigger "${incomingText}". Replying with: "${rule.reply}"`);
-            
-            try {
-                // Reply directly (quotes their message)
-                await msg.reply(rule.reply);
+        try {
+            const qrUrl = await qrcode.toDataURL(qr);
+            lastQrCodeData = qrUrl;
+            whatsappClientReady = false;
+            io.emit('qr', qrUrl);
+        } catch (err) {
+            console.error('Failed to generate QR data URL:', err.message);
+        }
+    });
 
-                // Phone was already extracted above
+    c.on('authenticated', () => {
+        console.log('WhatsApp Authenticated!');
+        lastQrCodeData = null;
+        io.emit('authenticated');
+    });
+
+    c.on('auth_failure', (msg) => {
+        console.error('WhatsApp Authentication Failure:', msg);
+        io.emit('automation_log', { message: `Auth Failure: ${msg}`, type: 'error' });
+    });
+
+    c.on('ready', () => {
+        console.log('WhatsApp Client Ready!');
+        whatsappClientReady = true;
+        lastQrCodeData = null;
+        io.emit('ready');
+    });
+
+    c.on('disconnected', (reason) => {
+        console.log('WhatsApp Client Disconnected:', reason);
+        whatsappClientReady = false;
+        lastQrCodeData = null;
+        io.emit('disconnected');
+    });
+
+    // Incoming message listener (for Chatbot Auto-Replies & Reply Tracking)
+    c.on('message', async (msg) => {
+        // Ignore group chats
+        if (msg.from.endsWith('@g.us')) return;
+
+        const phone = msg.from.split('@')[0];
+        const incomingText = msg.body.trim().toLowerCase();
+        console.log(`Received message from ${msg.from}: "${msg.body}"`);
+
+        // --- Log every incoming reply for the Excel report ---
+        logReply(phone, msg.body.trim());
+
+        // Check if chatbot is enabled before processing rules
+        if (!chatbotConfig.enabled) return;
+
+        // Scan through our triggers
+        for (const rule of chatbotConfig.rules) {
+            if (!rule.trigger || !rule.reply) continue;
+
+            // Split triggers by comma (e.g. "1,fine,good" -> ["1", "fine", "good"])
+            const triggers = rule.trigger.split(',').map(t => t.trim().toLowerCase());
+            
+            if (triggers.includes(incomingText)) {
+                console.log(`Matched trigger "${incomingText}". Replying with: "${rule.reply}"`);
                 
-                // Stream log to Dashboard
-                io.emit('automation_log', { 
-                    message: `🤖 Auto-replied to +${phone} (Matched: "${incomingText}") -> "${rule.reply}"`, 
-                    type: 'success' 
-                });
-            } catch (err) {
-                console.error('Failed to send auto-reply:', err.message);
-                io.emit('automation_log', { 
-                    message: `⚠️ Failed to send auto-reply to +${phone}: ${err.message}`, 
-                    type: 'error' 
-                });
+                try {
+                    // Reply directly (quotes their message)
+                    await msg.reply(rule.reply);
+
+                    // Stream log to Dashboard
+                    io.emit('automation_log', { 
+                        message: `🤖 Auto-replied to +${phone} (Matched: "${incomingText}") -> "${rule.reply}"`, 
+                        type: 'success' 
+                    });
+                } catch (err) {
+                    console.error('Failed to send auto-reply:', err.message);
+                    io.emit('automation_log', { 
+                        message: `⚠️ Failed to send auto-reply to +${phone}: ${err.message}`, 
+                        type: 'error' 
+                    });
+                }
+                break; // Stop evaluating rules after first match
             }
-            break; // Stop evaluating rules after first match
+        }
+    });
+}
+
+// Initialize with retry logic to handle Render rolling deployments
+// When Render deploys, the old container may still be running with Chromium holding the lock.
+// We retry with increasing delays to wait for the old container to shut down.
+async function initializeWithRetry(maxRetries = 5) {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        // Clean all singleton files before each attempt
+        console.log(`\n--- Initialization attempt ${attempt}/${maxRetries} ---`);
+        cleanAllSingletonFiles(DATA_DIR);
+
+        // Create a fresh client for each attempt
+        client = createClient();
+        setupClientListeners(client);
+
+        try {
+            await client.initialize();
+            console.log('Client initialized successfully!');
+            return; // Success - exit the retry loop
+        } catch (err) {
+            console.error(`Attempt ${attempt} failed: ${err.message}`);
+            
+            // Try to destroy the failed client
+            try { await client.destroy(); } catch (_) { /* ignore */ }
+            client = null;
+
+            if (attempt < maxRetries) {
+                const waitSec = attempt * 10; // 10s, 20s, 30s, 40s
+                console.log(`Waiting ${waitSec}s before retry (old container may still be running)...`);
+                await new Promise(r => setTimeout(r, waitSec * 1000));
+            } else {
+                console.error('=== All initialization attempts failed ===');
+                console.error('The persistent disk lock could not be cleared.');
+                console.error('Try manually restarting the Render service.');
+            }
         }
     }
-});
+}
 
-client.initialize();
+// Start initialization with retry
+console.log('Initializing WhatsApp Client...');
+initializeWithRetry();
 
 // ============================================================
 //  Express route: Download monthly Excel report
