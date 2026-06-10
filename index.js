@@ -431,16 +431,20 @@ app.get('/api/groups', async (req, res) => {
         // Evaluate custom browser script to fetch minimal group metadata directly from Store
         // This is 100x faster than client.getChats() because it avoids full serialization
         const groups = await client.pupPage.evaluate(() => {
-            if (!window.Store || !window.Store.Chat || !window.Store.Chat.models) {
+            try {
+                const collections = window.require('WAWebCollections');
+                if (!collections || !collections.Chat) return [];
+                const chats = collections.Chat.getModelsArray();
+                return chats
+                    .filter(chat => chat.isGroup || (chat.id && chat.id._serialized && chat.id._serialized.endsWith('@g.us')))
+                    .map(chat => ({
+                        id: chat.id._serialized,
+                        name: chat.name || chat.formattedTitle || 'Unnamed Group',
+                        timestamp: chat.t || 0 // Last activity timestamp
+                    }));
+            } catch (err) {
                 return [];
             }
-            return window.Store.Chat.models
-                .filter(chat => chat.isGroup)
-                .map(chat => ({
-                    id: chat.id._serialized,
-                    name: chat.name || chat.formattedTitle || 'Unnamed Group',
-                    timestamp: chat.t || 0 // Last activity timestamp
-                }));
         });
 
         // Sort by last active timestamp descending (most recent first)
