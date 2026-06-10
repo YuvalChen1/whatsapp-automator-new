@@ -89,6 +89,12 @@ app.post('/api/login', (req, res) => {
     return res.status(401).json({ error: 'Invalid username or password' });
 });
 
+// Logout POST endpoint
+app.post('/api/logout', (req, res) => {
+    res.setHeader('Set-Cookie', 'auth_session=; Path=/; HttpOnly; Max-Age=0; SameSite=Lax');
+    return res.json({ success: true });
+});
+
 // Global state variables
 let whatsappClientReady = false;
 let lastQrCodeData = null;

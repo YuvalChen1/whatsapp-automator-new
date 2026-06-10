@@ -24,9 +24,12 @@
                     <p>Send personalized messages seamlessly</p>
                 </div>
             </div>
-            <div class="status-badge disconnected" id="connection-status">
-                <span class="status-dot"></span>
-                <span class="status-text">Connecting Server...</span>
+            <div style="display: flex; align-items: center; gap: 1rem;">
+                <div class="status-badge disconnected" id="connection-status">
+                    <span class="status-dot"></span>
+                    <span class="status-text">Connecting Server...</span>
+                </div>
+                <button class="btn btn-secondary btn-sm" id="btn-dashboard-logout" style="padding: 0.5rem 1rem; font-size: 0.8rem; background: rgba(239, 68, 68, 0.1); color: var(--danger); border: 1px solid rgba(239, 68, 68, 0.2); border-radius: 8px; cursor: pointer; display: flex; align-items: center; gap: 0.5rem;"><i class="fas fa-sign-out-alt"></i> Log Out</button>
             </div>
         </header>
 
@@ -329,6 +332,7 @@
         const btnsStartManual = document.querySelectorAll('.btn-start-manual');
         const btnStop = document.getElementById('btn-stop');
         const btnLogout = document.getElementById('btn-logout');
+        const btnDashboardLogout = document.getElementById('btn-dashboard-logout');
         const contactsInput = document.getElementById('contacts-input');
         const csvFile = document.getElementById('csv-file');
         const fileNameDisplay = document.getElementById('file-name-display');
@@ -731,6 +735,20 @@
         btnLogout.addEventListener('click', () => {
             if (confirm('Are you sure you want to disconnect WhatsApp?')) {
                 socket.emit('logout');
+            }
+        });
+
+        // Dashboard log out (clears browser session cookie)
+        btnDashboardLogout.addEventListener('click', async () => {
+            if (confirm('Are you sure you want to log out of the dashboard?')) {
+                try {
+                    const res = await fetch('/api/logout', { method: 'POST' });
+                    if (res.ok) {
+                        window.location.href = '/login';
+                    }
+                } catch (err) {
+                    console.error('Logout request failed:', err);
+                }
             }
         });
 
