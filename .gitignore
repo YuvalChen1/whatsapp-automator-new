@@ -3,3 +3,4 @@ node_modules
 .wwebjs_cache
 package-lock.json
 replies.json
+session/

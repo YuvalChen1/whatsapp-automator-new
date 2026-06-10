@@ -14,9 +14,10 @@ const server = http.createServer(app);
 const io = new Server(server);
 
 const PORT = process.env.PORT || 3000;
-const SCHEDULE_FILE = path.join(__dirname, 'schedule.json');
-const CHATBOT_FILE = path.join(__dirname, 'chatbot_rules.json');
-const REPLIES_FILE = path.join(__dirname, 'replies.json');
+const DATA_DIR = process.env.DATA_DIR || __dirname;
+const SCHEDULE_FILE = path.join(DATA_DIR, 'schedule.json');
+const CHATBOT_FILE = path.join(DATA_DIR, 'chatbot_rules.json');
+const REPLIES_FILE = path.join(DATA_DIR, 'replies.json');
 
 // Serve static UI assets
 app.use(express.static(path.join(__dirname, 'public')));
@@ -46,6 +47,30 @@ let chatbotConfig = {
 let repliesData = {};
 
 // Load existing configs
+if (DATA_DIR !== __dirname) {
+    // Ensure the persistent folder exists
+    if (!fs.existsSync(DATA_DIR)) {
+        try {
+            fs.mkdirSync(DATA_DIR, { recursive: true });
+        } catch (err) {
+            console.error('Failed to create DATA_DIR:', err.message);
+        }
+    }
+    const filesToCopy = ['schedule.json', 'chatbot_rules.json'];
+    filesToCopy.forEach(file => {
+        const targetPath = path.join(DATA_DIR, file);
+        const sourcePath = path.join(__dirname, file);
+        if (!fs.existsSync(targetPath) && fs.existsSync(sourcePath)) {
+            try {
+                fs.copyFileSync(sourcePath, targetPath);
+                console.log(`Initialized persistent volume file: ${file}`);
+            } catch (err) {
+                console.error(`Failed to copy ${file} to persistent disk:`, err.message);
+            }
+        }
+    });
+}
+
 if (fs.existsSync(SCHEDULE_FILE)) {
     try {
         const raw = fs.readFileSync(SCHEDULE_FILE, 'utf8');
@@ -106,9 +131,12 @@ function logReply(phone, messageText) {
 // Initialize WhatsApp client
 console.log('Initializing WhatsApp Client...');
 const client = new Client({
-    authStrategy: new LocalAuth(),
+    authStrategy: new LocalAuth({
+        dataPath: DATA_DIR
+    }),
     puppeteer: {
         headless: true,
+        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
         args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
