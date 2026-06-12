@@ -219,6 +219,34 @@ function updateTargetedFromSchedule() {
     }
 }
 
+function isTargeted(jid) {
+    if (!jid) return false;
+    
+    // Direct check (works for groups and correct user JIDs)
+    if (targetedContacts.has(jid)) return true;
+    
+    // Suffix check for user JIDs (resilient against country code differences)
+    if (jid.endsWith('@c.us')) {
+        const cleanIncoming = jid.split('@')[0].replace(/[^0-9]/g, '');
+        // If the number is short, don't do suffix match to avoid collision
+        if (cleanIncoming.length >= 7) {
+            for (const target of targetedContacts) {
+                if (target.endsWith('@c.us')) {
+                    const cleanTarget = target.split('@')[0].replace(/[^0-9]/g, '');
+                    if (cleanTarget.length >= 7) {
+                        const tailIncoming = cleanIncoming.slice(-7);
+                        const tailTarget = cleanTarget.slice(-7);
+                        if (tailIncoming === tailTarget) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return false;
+}
+
 // Helper: log every incoming reply to repliesData and persist
 function logReply(phone, messageText) {
     const now = new Date();
@@ -443,14 +471,18 @@ function initializeWhatsAppClient() {
 
     // Incoming message listener (for Chatbot Auto-Replies & Reply Tracking)
     client.on('message', async (msg) => {
-        // ONLY process replies from contacts or groups that were targeted by the automation
-        if (!targetedContacts.has(msg.from)) {
-            return;
-        }
-
         const isGroup = msg.from.endsWith('@g.us');
         // Get the participant's JID if in a group, otherwise the sender JID
         const sender = isGroup ? (msg.author || msg.from) : msg.from;
+        const targeted = isTargeted(msg.from);
+        
+        console.log(`[Incoming message] from: ${msg.from}, sender: ${sender}, targeted: ${targeted}, body: "${msg.body}"`);
+
+        // ONLY process replies from contacts or groups that were targeted by the automation
+        if (!targeted) {
+            return;
+        }
+
         const phone = sender.split('@')[0];
         const incomingText = msg.body.trim().toLowerCase();
         console.log(`Received message from ${isGroup ? 'group ' + msg.from + ' (author: ' + sender + ')' : msg.from}: "${msg.body}"`);
@@ -834,10 +866,16 @@ async function runAutomation(contacts, messageBody = null, minDelay = 6, maxDela
             }
 
             if (canSend) {
-                await client.sendMessage(whatsappId, message);
+                const sentMsg = await client.sendMessage(whatsappId, message);
                 activeAutomation.sent++;
                 io.emit('automation_log', { message: `Success: Message sent to ${name}.`, type: 'success' });
-                recordTargetedContact(whatsappId);
+                
+                // Record the actual resolved JID returned by WhatsApp
+                if (sentMsg && sentMsg.to) {
+                    recordTargetedContact(sentMsg.to);
+                } else {
+                    recordTargetedContact(whatsappId);
+                }
             }
         } catch (err) {
             activeAutomation.failed++;
