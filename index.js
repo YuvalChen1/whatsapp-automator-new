@@ -1,4 +1,4 @@
-console.log('=== APP VERSION 2.3.0 (LID-to-phone mapping fix) ===');
+console.log('=== APP VERSION 2.4.0 (record recipient LID at send time) ===');
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -546,24 +546,21 @@ function initializeWhatsAppClient() {
 
     // === SHARED MESSAGE HANDLER (attached to both 'message' and 'message_create') ===
     async function handleIncomingMessage(msg, eventSource) {
-        // Skip our own outgoing messages
+        // For our OWN outgoing messages: capture the recipient's LID and add to targeted
         if (msg.fromMe) {
-            // BUT: capture outgoing messages to build LID mapping!
-            // When we send to 972506798676@c.us, msg.to might be their @lid
-            if (msg.to && msg.to.endsWith('@lid')) {
-                // msg.to is the recipient's LID. We need to find the @c.us we sent to.
-                // The chat ID might help
-                try {
-                    const chat = await msg.getChat();
-                    if (chat && chat.id && chat.id._serialized) {
-                        const chatId = chat.id._serialized;
-                        debugLog(eventSource, `Outgoing msg: to=${msg.to}, chat=${chatId}`);
-                        if (chatId.endsWith('@c.us')) {
-                            registerLidMapping(msg.to, chatId);
-                        }
+            if (msg.to) {
+                // Check if this outgoing message goes to someone we're tracking
+                // by seeing if the msg.to (LID) is already targeted or if we just sent via automation
+                const recipientId = msg.to;
+                debugLog(eventSource, `Outgoing msg detected: to=${recipientId}`);
+                // Record the recipient LID as targeted (automation already recorded @c.us,
+                // this adds the @lid variant so incoming replies match directly)
+                if (!targetedContacts.has(recipientId)) {
+                    // Only auto-add if we have at least 1 targeted contact (i.e., automation is active)
+                    if (targetedContacts.size > 0) {
+                        recordTargetedContact(recipientId);
+                        debugLog(eventSource, `Recorded outgoing recipient as targeted: ${recipientId}`);
                     }
-                } catch (err) {
-                    debugLog(eventSource, `Failed to get chat for outgoing msg: ${err.message}`);
                 }
             }
             return;
@@ -1053,10 +1050,17 @@ async function runAutomation(contacts, messageBody = null, minDelay = 6, maxDela
             }
 
             if (canSend) {
-                await client.sendMessage(whatsappId, message);
+                const sentMsg = await client.sendMessage(whatsappId, message);
                 activeAutomation.sent++;
                 io.emit('automation_log', { message: `Success: Message sent to ${name}.`, type: 'success' });
                 recordTargetedContact(whatsappId);
+                
+                // Also record the recipient's LID (WhatsApp's new internal ID format)
+                // so that incoming replies from their @lid address match directly
+                if (sentMsg && sentMsg.to) {
+                    debugLog('AUTOMATION', `Sent message to ${whatsappId}, recipient LID: ${sentMsg.to}`);
+                    recordTargetedContact(sentMsg.to);
+                }
             }
         } catch (err) {
             activeAutomation.failed++;
