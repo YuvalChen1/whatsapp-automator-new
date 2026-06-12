@@ -1,4 +1,4 @@
-console.log('=== APP VERSION 2.1.0 (message_create + targetedCount fix) ===');
+console.log('=== APP VERSION 2.2.0 (dual-event + browser debug log) ===');
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -102,6 +102,29 @@ let lastQrCodeData = null;
 let activeAutomation = null; // Stores running automation state
 let shouldStopAutomation = false;
 let currentCronJob = null;
+
+// === IN-MEMORY DEBUG LOG (viewable from browser via /api/debug-log) ===
+const debugLogEntries = [];
+const MAX_DEBUG_ENTRIES = 200;
+function debugLog(tag, message) {
+    const entry = `[${new Date().toISOString()}] [${tag}] ${message}`;
+    console.log(entry);
+    debugLogEntries.push(entry);
+    if (debugLogEntries.length > MAX_DEBUG_ENTRIES) debugLogEntries.shift();
+    // Also push to connected dashboard clients in real-time
+    io.emit('debug_log', entry);
+}
+
+// Track processed message IDs to avoid duplicate processing from dual event listeners
+const processedMessageIds = new Set();
+const MAX_PROCESSED_IDS = 1000;
+function markProcessed(id) {
+    processedMessageIds.add(id);
+    if (processedMessageIds.size > MAX_PROCESSED_IDS) {
+        const first = processedMessageIds.values().next().value;
+        processedMessageIds.delete(first);
+    }
+}
 
 // Schedule Configuration state
 let scheduleConfig = {
@@ -472,35 +495,38 @@ function initializeWhatsAppClient() {
         io.emit('disconnected');
     });
 
-    // Incoming message listener (for Chatbot Auto-Replies & Reply Tracking)
-    // Using 'message_create' instead of 'message' - it is more reliable across
-    // whatsapp-web.js versions and catches messages in groups more consistently.
-    client.on('message_create', async (msg) => {
+    // === SHARED MESSAGE HANDLER (attached to both 'message' and 'message_create') ===
+    async function handleIncomingMessage(msg, eventSource) {
         // Skip our own outgoing messages
         if (msg.fromMe) {
             return;
         }
 
+        // Deduplicate: if we already processed this message ID from the other event, skip
+        const msgId = msg.id && msg.id._serialized ? msg.id._serialized : msg.id;
+        if (processedMessageIds.has(msgId)) {
+            debugLog(eventSource, `DEDUP - already processed message ${msgId}, skipping.`);
+            return;
+        }
+        markProcessed(msgId);
+
         const isGroup = msg.from.endsWith('@g.us');
-        // Get the participant's JID if in a group, otherwise the sender JID
         const sender = isGroup ? (msg.author || msg.from) : msg.from;
         const targeted = isTargeted(msg.from);
         
-        console.log(`[MESSAGE_CREATE] from: ${msg.from}, sender: ${sender}, targeted: ${targeted}, body: "${msg.body}", fromMe: ${msg.fromMe}`);
-        console.log(`[MESSAGE_CREATE] Current targeted contacts (${targetedContacts.size}): ${JSON.stringify(Array.from(targetedContacts))}`);
+        debugLog(eventSource, `from: ${msg.from}, sender: ${sender}, targeted: ${targeted}, body: "${msg.body}", fromMe: ${msg.fromMe}`);
+        debugLog(eventSource, `Targeted contacts (${targetedContacts.size}): ${JSON.stringify(Array.from(targetedContacts))}`);
 
-        // ONLY process replies from contacts or groups that were targeted by the automation
         if (!targeted) {
-            console.log(`[MESSAGE_CREATE] SKIPPED - ${msg.from} is NOT in targeted contacts.`);
+            debugLog(eventSource, `SKIPPED - ${msg.from} is NOT in targeted contacts.`);
             return;
         }
 
-        console.log(`[MESSAGE_CREATE] MATCH FOUND - Processing message from ${msg.from}`);
+        debugLog(eventSource, `MATCH FOUND - Processing message from ${msg.from}`);
 
         const phone = sender.split('@')[0];
         const incomingText = msg.body.trim().toLowerCase();
 
-        // Fetch contact details to see if it is a saved contact (personal name)
         let displayName = phone;
         try {
             const contact = await msg.getContact();
@@ -508,55 +534,60 @@ function initializeWhatsAppClient() {
                 displayName = contact.name;
             }
         } catch (err) {
-            console.error('Failed to get contact details:', err.message);
+            debugLog(eventSource, `Failed to get contact details: ${err.message}`);
         }
 
-        console.log(`[MESSAGE_CREATE] Received from ${isGroup ? 'group ' + msg.from + ' (author: ' + displayName + ')' : displayName}: "${msg.body}"`);
+        debugLog(eventSource, `Received from ${isGroup ? 'group ' + msg.from + ' (author: ' + displayName + ')' : displayName}: "${msg.body}"`);
 
         // --- Log every incoming reply for the Excel report ---
         logReply(displayName, isGroup ? `[Group Chat] ${msg.body.trim()}` : msg.body.trim());
-        console.log(`[MESSAGE_CREATE] Reply logged to reports. Current repliesData keys: ${JSON.stringify(Object.keys(repliesData))}`);
+        debugLog(eventSource, `Reply logged. repliesData keys: ${JSON.stringify(Object.keys(repliesData))}`);
 
-        // Check if chatbot is enabled before processing rules
+        // Check if chatbot is enabled
         if (!chatbotConfig.enabled) {
-            console.log(`[MESSAGE_CREATE] Chatbot is DISABLED, skipping rule matching.`);
+            debugLog(eventSource, `Chatbot is DISABLED, skipping rule matching.`);
             return;
         }
 
-        console.log(`[MESSAGE_CREATE] Chatbot is ENABLED. Checking ${chatbotConfig.rules.length} rules against input: "${incomingText}"`);
+        debugLog(eventSource, `Chatbot ENABLED. Checking ${chatbotConfig.rules.length} rules against: "${incomingText}"`);
 
-        // Scan through our triggers
         for (const rule of chatbotConfig.rules) {
             if (!rule.trigger || !rule.reply) continue;
 
-            // Split triggers by comma (e.g. "1,fine,good" -> ["1", "fine", "good"])
             const triggers = rule.trigger.split(',').map(t => t.trim().toLowerCase());
-            
-            console.log(`[MESSAGE_CREATE] Checking rule: triggers=[${triggers.join(', ')}] against "${incomingText}"`);
+            debugLog(eventSource, `Checking rule: triggers=[${triggers.join(', ')}] against "${incomingText}"`);
 
             if (triggers.includes(incomingText)) {
-                console.log(`[MESSAGE_CREATE] TRIGGER MATCHED "${incomingText}". Replying with: "${rule.reply}"`);
+                debugLog(eventSource, `TRIGGER MATCHED "${incomingText}". Replying: "${rule.reply}"`);
                 
                 try {
-                    // Reply directly (quotes their message)
                     await msg.reply(rule.reply);
-                    console.log(`[MESSAGE_CREATE] Auto-reply sent successfully.`);
+                    debugLog(eventSource, `Auto-reply sent successfully!`);
 
-                    // Stream log to Dashboard
                     io.emit('automation_log', { 
                         message: `🤖 Auto-replied to +${phone} (Matched: "${incomingText}") -> "${rule.reply}"`, 
                         type: 'success' 
                     });
                 } catch (err) {
-                    console.error(`[MESSAGE_CREATE] Failed to send auto-reply:`, err.message);
+                    debugLog(eventSource, `FAILED to send auto-reply: ${err.message}`);
                     io.emit('automation_log', { 
                         message: `⚠️ Failed to send auto-reply to +${phone}: ${err.message}`, 
                         type: 'error' 
                     });
                 }
-                break; // Stop evaluating rules after first match
+                break;
             }
         }
+    }
+
+    // Listen to BOTH events for maximum reliability across environments
+    client.on('message', (msg) => {
+        debugLog('MSG', `Event 'message' fired. from=${msg.from}, body="${msg.body}", fromMe=${msg.fromMe}`);
+        handleIncomingMessage(msg, 'MSG');
+    });
+    client.on('message_create', (msg) => {
+        debugLog('MSG_CREATE', `Event 'message_create' fired. from=${msg.from}, body="${msg.body}", fromMe=${msg.fromMe}`);
+        handleIncomingMessage(msg, 'MSG_CREATE');
     });
 
     client.initialize().catch(err => {
@@ -728,6 +759,20 @@ app.get('/api/status', (req, res) => {
         clientState: client ? 'Initialized' : 'Not Initialized',
         targetedCount: targetedContacts.size,
         targetedContacts: Array.from(targetedContacts)
+    });
+});
+
+// API route: view debug log from the browser (no Render console needed!)
+app.get('/api/debug-log', (req, res) => {
+    res.json({
+        totalEntries: debugLogEntries.length,
+        entries: debugLogEntries,
+        targetedContacts: Array.from(targetedContacts),
+        chatbotEnabled: chatbotConfig.enabled,
+        chatbotRulesCount: chatbotConfig.rules.length,
+        chatbotRules: chatbotConfig.rules,
+        repliesDataKeys: Object.keys(repliesData),
+        whatsappReady: whatsappClientReady
     });
 });
 
