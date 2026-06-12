@@ -1,4 +1,4 @@
-console.log('=== APP VERSION 2.2.0 (dual-event + browser debug log) ===');
+console.log('=== APP VERSION 2.3.0 (LID-to-phone mapping fix) ===');
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -124,6 +124,55 @@ function markProcessed(id) {
         const first = processedMessageIds.values().next().value;
         processedMessageIds.delete(first);
     }
+}
+
+// === LID-TO-PHONE MAPPING ===
+// WhatsApp now uses @lid (Linked ID) format for message routing.
+// We need to map LID <-> phone number so we can match incoming @lid messages
+// against our targeted contacts stored as @c.us.
+const LID_MAP_FILE = path.join(DATA_DIR, 'lid_map.json');
+let lidToPhone = {};  // { "73933600633038@lid": "972506798676@c.us", ... }
+let phoneToLid = {};  // reverse map
+
+if (fs.existsSync(LID_MAP_FILE)) {
+    try {
+        lidToPhone = JSON.parse(fs.readFileSync(LID_MAP_FILE, 'utf8'));
+        // Build reverse map
+        for (const [lid, phone] of Object.entries(lidToPhone)) {
+            phoneToLid[phone] = lid;
+        }
+        console.log(`Loaded LID map with ${Object.keys(lidToPhone).length} entries.`);
+    } catch (e) {
+        console.error('Error reading lid_map.json:', e.message);
+    }
+}
+
+function saveLidMap() {
+    try {
+        fs.writeFileSync(LID_MAP_FILE, JSON.stringify(lidToPhone, null, 2));
+    } catch (err) {
+        console.error('Failed to save lid_map.json:', err.message);
+    }
+}
+
+function registerLidMapping(lid, phoneJid) {
+    if (!lid || !phoneJid) return;
+    if (lidToPhone[lid] === phoneJid) return; // already mapped
+    lidToPhone[lid] = phoneJid;
+    phoneToLid[phoneJid] = lid;
+    saveLidMap();
+    debugLog('LID_MAP', `Mapped ${lid} <-> ${phoneJid}`);
+}
+
+function resolveToPhone(jid) {
+    // If it's already a @c.us or @g.us, return as-is
+    if (!jid) return jid;
+    if (jid.endsWith('@c.us') || jid.endsWith('@g.us')) return jid;
+    // If it's a @lid, try to resolve
+    if (jid.endsWith('@lid') && lidToPhone[jid]) {
+        return lidToPhone[jid];
+    }
+    return jid; // unresolvable, return as-is
 }
 
 // Schedule Configuration state
@@ -499,30 +548,75 @@ function initializeWhatsAppClient() {
     async function handleIncomingMessage(msg, eventSource) {
         // Skip our own outgoing messages
         if (msg.fromMe) {
+            // BUT: capture outgoing messages to build LID mapping!
+            // When we send to 972506798676@c.us, msg.to might be their @lid
+            if (msg.to && msg.to.endsWith('@lid')) {
+                // msg.to is the recipient's LID. We need to find the @c.us we sent to.
+                // The chat ID might help
+                try {
+                    const chat = await msg.getChat();
+                    if (chat && chat.id && chat.id._serialized) {
+                        const chatId = chat.id._serialized;
+                        debugLog(eventSource, `Outgoing msg: to=${msg.to}, chat=${chatId}`);
+                        if (chatId.endsWith('@c.us')) {
+                            registerLidMapping(msg.to, chatId);
+                        }
+                    }
+                } catch (err) {
+                    debugLog(eventSource, `Failed to get chat for outgoing msg: ${err.message}`);
+                }
+            }
             return;
         }
 
-        // Deduplicate: if we already processed this message ID from the other event, skip
+        // Deduplicate
         const msgId = msg.id && msg.id._serialized ? msg.id._serialized : msg.id;
         if (processedMessageIds.has(msgId)) {
-            debugLog(eventSource, `DEDUP - already processed message ${msgId}, skipping.`);
+            debugLog(eventSource, `DEDUP - already processed ${msgId}, skipping.`);
             return;
         }
         markProcessed(msgId);
 
-        const isGroup = msg.from.endsWith('@g.us');
-        const sender = isGroup ? (msg.author || msg.from) : msg.from;
-        const targeted = isTargeted(msg.from);
+        // === RESOLVE @lid TO PHONE NUMBER ===
+        let resolvedFrom = msg.from;
+        if (msg.from.endsWith('@lid')) {
+            // Try our cached map first
+            const mapped = resolveToPhone(msg.from);
+            if (mapped !== msg.from) {
+                resolvedFrom = mapped;
+                debugLog(eventSource, `Resolved ${msg.from} -> ${resolvedFrom} via LID map.`);
+            } else {
+                // Map miss: try to resolve via getContact()
+                debugLog(eventSource, `LID map miss for ${msg.from}. Trying getContact()...`);
+                try {
+                    const contact = await msg.getContact();
+                    if (contact && contact.number) {
+                        const phoneJid = contact.number.replace(/[^0-9]/g, '') + '@c.us';
+                        resolvedFrom = phoneJid;
+                        registerLidMapping(msg.from, phoneJid);
+                        debugLog(eventSource, `Resolved ${msg.from} -> ${resolvedFrom} via getContact(). Name: ${contact.name || 'N/A'}`);
+                    } else {
+                        debugLog(eventSource, `getContact() returned no number for ${msg.from}.`);
+                    }
+                } catch (err) {
+                    debugLog(eventSource, `Failed to resolve @lid via getContact: ${err.message}`);
+                }
+            }
+        }
+
+        const isGroup = resolvedFrom.endsWith('@g.us');
+        const sender = isGroup ? (msg.author || msg.from) : resolvedFrom;
+        const targeted = isTargeted(resolvedFrom);
         
-        debugLog(eventSource, `from: ${msg.from}, sender: ${sender}, targeted: ${targeted}, body: "${msg.body}", fromMe: ${msg.fromMe}`);
+        debugLog(eventSource, `from: ${msg.from}, resolved: ${resolvedFrom}, sender: ${sender}, targeted: ${targeted}, body: "${msg.body}"`);
         debugLog(eventSource, `Targeted contacts (${targetedContacts.size}): ${JSON.stringify(Array.from(targetedContacts))}`);
 
         if (!targeted) {
-            debugLog(eventSource, `SKIPPED - ${msg.from} is NOT in targeted contacts.`);
+            debugLog(eventSource, `SKIPPED - ${resolvedFrom} (original: ${msg.from}) is NOT in targeted contacts.`);
             return;
         }
 
-        debugLog(eventSource, `MATCH FOUND - Processing message from ${msg.from}`);
+        debugLog(eventSource, `MATCH FOUND - Processing message from ${resolvedFrom} (original: ${msg.from})`);
 
         const phone = sender.split('@')[0];
         const incomingText = msg.body.trim().toLowerCase();
@@ -537,7 +631,7 @@ function initializeWhatsAppClient() {
             debugLog(eventSource, `Failed to get contact details: ${err.message}`);
         }
 
-        debugLog(eventSource, `Received from ${isGroup ? 'group ' + msg.from + ' (author: ' + displayName + ')' : displayName}: "${msg.body}"`);
+        debugLog(eventSource, `Received from ${isGroup ? 'group ' + resolvedFrom + ' (author: ' + displayName + ')' : displayName}: "${msg.body}"`);
 
         // --- Log every incoming reply for the Excel report ---
         logReply(displayName, isGroup ? `[Group Chat] ${msg.body.trim()}` : msg.body.trim());
@@ -565,13 +659,13 @@ function initializeWhatsAppClient() {
                     debugLog(eventSource, `Auto-reply sent successfully!`);
 
                     io.emit('automation_log', { 
-                        message: `🤖 Auto-replied to +${phone} (Matched: "${incomingText}") -> "${rule.reply}"`, 
+                        message: `🤖 Auto-replied to ${displayName} (Matched: "${incomingText}") -> "${rule.reply}"`, 
                         type: 'success' 
                     });
                 } catch (err) {
                     debugLog(eventSource, `FAILED to send auto-reply: ${err.message}`);
                     io.emit('automation_log', { 
-                        message: `⚠️ Failed to send auto-reply to +${phone}: ${err.message}`, 
+                        message: `⚠️ Failed to send auto-reply to ${displayName}: ${err.message}`, 
                         type: 'error' 
                     });
                 }
@@ -765,13 +859,16 @@ app.get('/api/status', (req, res) => {
 // API route: view debug log from the browser (no Render console needed!)
 app.get('/api/debug-log', (req, res) => {
     res.json({
+        version: '2.3.0',
         totalEntries: debugLogEntries.length,
         entries: debugLogEntries,
         targetedContacts: Array.from(targetedContacts),
+        lidMap: lidToPhone,
         chatbotEnabled: chatbotConfig.enabled,
         chatbotRulesCount: chatbotConfig.rules.length,
         chatbotRules: chatbotConfig.rules,
         repliesDataKeys: Object.keys(repliesData),
+        repliesData: repliesData,
         whatsappReady: whatsappClientReady
     });
 });
