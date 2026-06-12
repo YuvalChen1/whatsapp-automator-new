@@ -1,4 +1,4 @@
-console.log('=== APP VERSION 2.0.0 (LOCAL SESSION - NO LOCK CONFLICTS) ===');
+console.log('=== APP VERSION 2.1.0 (message_create + targetedCount fix) ===');
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -190,14 +190,17 @@ if (fs.existsSync(TARGETED_CONTACTS_FILE)) {
 }
 
 function recordTargetedContact(id) {
+    console.log(`[recordTargetedContact] Called with id: ${id}, already tracked: ${targetedContacts.has(id)}, current set size: ${targetedContacts.size}`);
     if (!targetedContacts.has(id)) {
         targetedContacts.add(id);
         try {
             fs.writeFileSync(TARGETED_CONTACTS_FILE, JSON.stringify(Array.from(targetedContacts), null, 2));
-            console.log(`Recorded new targeted contact: ${id}`);
+            console.log(`[recordTargetedContact] SUCCESS - Recorded new targeted contact: ${id}. Total tracked: ${targetedContacts.size}`);
         } catch (err) {
-            console.error('Failed to write targeted_contacts.json:', err.message);
+            console.error('[recordTargetedContact] FAILED to write targeted_contacts.json:', err.message);
         }
+        // Notify UI in real-time
+        io.emit('targeted_update', { count: targetedContacts.size, contacts: Array.from(targetedContacts) });
     }
 }
 
@@ -470,18 +473,29 @@ function initializeWhatsAppClient() {
     });
 
     // Incoming message listener (for Chatbot Auto-Replies & Reply Tracking)
-    client.on('message', async (msg) => {
+    // Using 'message_create' instead of 'message' - it is more reliable across
+    // whatsapp-web.js versions and catches messages in groups more consistently.
+    client.on('message_create', async (msg) => {
+        // Skip our own outgoing messages
+        if (msg.fromMe) {
+            return;
+        }
+
         const isGroup = msg.from.endsWith('@g.us');
         // Get the participant's JID if in a group, otherwise the sender JID
         const sender = isGroup ? (msg.author || msg.from) : msg.from;
         const targeted = isTargeted(msg.from);
         
-        console.log(`[Incoming message] from: ${msg.from}, sender: ${sender}, targeted: ${targeted}, body: "${msg.body}"`);
+        console.log(`[MESSAGE_CREATE] from: ${msg.from}, sender: ${sender}, targeted: ${targeted}, body: "${msg.body}", fromMe: ${msg.fromMe}`);
+        console.log(`[MESSAGE_CREATE] Current targeted contacts (${targetedContacts.size}): ${JSON.stringify(Array.from(targetedContacts))}`);
 
         // ONLY process replies from contacts or groups that were targeted by the automation
         if (!targeted) {
+            console.log(`[MESSAGE_CREATE] SKIPPED - ${msg.from} is NOT in targeted contacts.`);
             return;
         }
+
+        console.log(`[MESSAGE_CREATE] MATCH FOUND - Processing message from ${msg.from}`);
 
         const phone = sender.split('@')[0];
         const incomingText = msg.body.trim().toLowerCase();
@@ -497,13 +511,19 @@ function initializeWhatsAppClient() {
             console.error('Failed to get contact details:', err.message);
         }
 
-        console.log(`Received message from ${isGroup ? 'group ' + msg.from + ' (author: ' + displayName + ')' : displayName}: "${msg.body}"`);
+        console.log(`[MESSAGE_CREATE] Received from ${isGroup ? 'group ' + msg.from + ' (author: ' + displayName + ')' : displayName}: "${msg.body}"`);
 
         // --- Log every incoming reply for the Excel report ---
         logReply(displayName, isGroup ? `[Group Chat] ${msg.body.trim()}` : msg.body.trim());
+        console.log(`[MESSAGE_CREATE] Reply logged to reports. Current repliesData keys: ${JSON.stringify(Object.keys(repliesData))}`);
 
         // Check if chatbot is enabled before processing rules
-        if (!chatbotConfig.enabled) return;
+        if (!chatbotConfig.enabled) {
+            console.log(`[MESSAGE_CREATE] Chatbot is DISABLED, skipping rule matching.`);
+            return;
+        }
+
+        console.log(`[MESSAGE_CREATE] Chatbot is ENABLED. Checking ${chatbotConfig.rules.length} rules against input: "${incomingText}"`);
 
         // Scan through our triggers
         for (const rule of chatbotConfig.rules) {
@@ -512,12 +532,15 @@ function initializeWhatsAppClient() {
             // Split triggers by comma (e.g. "1,fine,good" -> ["1", "fine", "good"])
             const triggers = rule.trigger.split(',').map(t => t.trim().toLowerCase());
             
+            console.log(`[MESSAGE_CREATE] Checking rule: triggers=[${triggers.join(', ')}] against "${incomingText}"`);
+
             if (triggers.includes(incomingText)) {
-                console.log(`Matched trigger "${incomingText}". Replying with: "${rule.reply}"`);
+                console.log(`[MESSAGE_CREATE] TRIGGER MATCHED "${incomingText}". Replying with: "${rule.reply}"`);
                 
                 try {
                     // Reply directly (quotes their message)
                     await msg.reply(rule.reply);
+                    console.log(`[MESSAGE_CREATE] Auto-reply sent successfully.`);
 
                     // Stream log to Dashboard
                     io.emit('automation_log', { 
@@ -525,7 +548,7 @@ function initializeWhatsAppClient() {
                         type: 'success' 
                     });
                 } catch (err) {
-                    console.error('Failed to send auto-reply:', err.message);
+                    console.error(`[MESSAGE_CREATE] Failed to send auto-reply:`, err.message);
                     io.emit('automation_log', { 
                         message: `⚠️ Failed to send auto-reply to +${phone}: ${err.message}`, 
                         type: 'error' 
@@ -702,7 +725,9 @@ app.get('/api/status', (req, res) => {
             heapUsed: Math.round(memory.heapUsed / 1024 / 1024) + ' MB',
             rss: Math.round(memory.rss / 1024 / 1024) + ' MB'
         },
-        clientState: client ? 'Initialized' : 'Not Initialized'
+        clientState: client ? 'Initialized' : 'Not Initialized',
+        targetedCount: targetedContacts.size,
+        targetedContacts: Array.from(targetedContacts)
     });
 });
 
