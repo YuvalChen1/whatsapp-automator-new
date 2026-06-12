@@ -674,6 +674,25 @@ app.post('/api/restart-client', (req, res) => {
     }
 });
 
+// API route: clear all reports (replies.json and targeted_contacts.json)
+app.post('/api/clear-reports', (req, res) => {
+    console.log('Manual request received to clear all reports history...');
+    try {
+        repliesData = {};
+        targetedContacts = new Set();
+        
+        // Write empty files to disk
+        fs.writeFileSync(REPLIES_FILE, JSON.stringify(repliesData, null, 2));
+        fs.writeFileSync(TARGETED_CONTACTS_FILE, JSON.stringify([], null, 2));
+        
+        console.log('Reports and targeted contacts cleared successfully.');
+        res.json({ success: true, message: 'All reports history cleared.' });
+    } catch (err) {
+        console.error('Failed to clear reports history:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // API route: get available months for the dropdown
 app.get('/api/reply-months', (req, res) => {
     const months = Object.keys(repliesData).sort().reverse();
