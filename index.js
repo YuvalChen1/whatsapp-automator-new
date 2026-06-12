@@ -19,6 +19,7 @@ const DATA_DIR = process.env.DATA_DIR || __dirname;
 const SCHEDULE_FILE = path.join(DATA_DIR, 'schedule.json');
 const CHATBOT_FILE = path.join(DATA_DIR, 'chatbot_rules.json');
 const REPLIES_FILE = path.join(DATA_DIR, 'replies.json');
+const TARGETED_CONTACTS_FILE = path.join(DATA_DIR, 'targeted_contacts.json');
 
 // === NEW: Session isolation strategy ===
 // Persistent disk stores a BACKUP of the session (no Chromium lock files)
@@ -171,6 +172,50 @@ if (fs.existsSync(REPLIES_FILE)) {
         console.log('Loaded replies tracking data.');
     } catch (e) {
         console.error('Error reading replies.json:', e.message);
+    }
+}
+
+// === TARGETED CONTACTS TRACKING ===
+let targetedContacts = new Set();
+
+if (fs.existsSync(TARGETED_CONTACTS_FILE)) {
+    try {
+        const raw = fs.readFileSync(TARGETED_CONTACTS_FILE, 'utf8');
+        const parsed = JSON.parse(raw);
+        targetedContacts = new Set(parsed);
+        console.log(`Loaded ${targetedContacts.size} targeted contacts.`);
+    } catch (e) {
+        console.error('Error reading targeted_contacts.json:', e.message);
+    }
+}
+
+function recordTargetedContact(id) {
+    if (!targetedContacts.has(id)) {
+        targetedContacts.add(id);
+        try {
+            fs.writeFileSync(TARGETED_CONTACTS_FILE, JSON.stringify(Array.from(targetedContacts), null, 2));
+            console.log(`Recorded new targeted contact: ${id}`);
+        } catch (err) {
+            console.error('Failed to write targeted_contacts.json:', err.message);
+        }
+    }
+}
+
+function updateTargetedFromSchedule() {
+    if (scheduleConfig && scheduleConfig.contacts) {
+        scheduleConfig.contacts.forEach(c => {
+            const rawPhone = c.phone.toString().trim();
+            let whatsappId;
+            if (rawPhone.endsWith('@g.us')) {
+                whatsappId = rawPhone;
+            } else if (rawPhone.endsWith('@c.us')) {
+                whatsappId = rawPhone;
+            } else {
+                const cleanPhone = rawPhone.replace(/[^0-9]/g, '');
+                whatsappId = `${cleanPhone}@c.us`;
+            }
+            recordTargetedContact(whatsappId);
+        });
     }
 }
 
@@ -398,6 +443,11 @@ function initializeWhatsAppClient() {
 
     // Incoming message listener (for Chatbot Auto-Replies & Reply Tracking)
     client.on('message', async (msg) => {
+        // ONLY process replies from contacts or groups that were targeted by the automation
+        if (!targetedContacts.has(msg.from)) {
+            return;
+        }
+
         const isGroup = msg.from.endsWith('@g.us');
         // Get the participant's JID if in a group, otherwise the sender JID
         const sender = isGroup ? (msg.author || msg.from) : msg.from;
@@ -768,6 +818,7 @@ async function runAutomation(contacts, messageBody = null, minDelay = 6, maxDela
                 await client.sendMessage(whatsappId, message);
                 activeAutomation.sent++;
                 io.emit('automation_log', { message: `Success: Message sent to ${name}.`, type: 'success' });
+                recordTargetedContact(whatsappId);
             }
         } catch (err) {
             activeAutomation.failed++;
@@ -800,6 +851,9 @@ function applySchedule() {
         currentCronJob.stop();
         currentCronJob = null;
     }
+
+    // Load schedule contacts into the targeted list so their replies are tracked
+    updateTargetedFromSchedule();
 
     if (!scheduleConfig.enabled || !scheduleConfig.time) {
         console.log('Daily schedule is disabled.');
