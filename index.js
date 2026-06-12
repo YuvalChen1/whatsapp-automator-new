@@ -737,6 +737,14 @@ app.post('/api/clear-reports', (req, res) => {
     }
 });
 
+// API route: debug targeted contacts (see which numbers are currently tracked)
+app.get('/api/debug-contacts', (req, res) => {
+    res.json({
+        count: targetedContacts.size,
+        contacts: Array.from(targetedContacts)
+    });
+});
+
 // API route: get available months for the dropdown
 app.get('/api/reply-months', (req, res) => {
     const months = Object.keys(repliesData).sort().reverse();
