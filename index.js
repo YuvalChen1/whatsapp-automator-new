@@ -1,4 +1,4 @@
-console.log('=== APP VERSION 2.4.0 (record recipient LID at send time) ===');
+console.log('=== APP VERSION 2.5.0 (check both original + resolved JID) ===');
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -603,7 +603,7 @@ function initializeWhatsAppClient() {
 
         const isGroup = resolvedFrom.endsWith('@g.us');
         const sender = isGroup ? (msg.author || msg.from) : resolvedFrom;
-        const targeted = isTargeted(resolvedFrom);
+        const targeted = isTargeted(resolvedFrom) || (msg.from !== resolvedFrom && isTargeted(msg.from));
         
         debugLog(eventSource, `from: ${msg.from}, resolved: ${resolvedFrom}, sender: ${sender}, targeted: ${targeted}, body: "${msg.body}"`);
         debugLog(eventSource, `Targeted contacts (${targetedContacts.size}): ${JSON.stringify(Array.from(targetedContacts))}`);
