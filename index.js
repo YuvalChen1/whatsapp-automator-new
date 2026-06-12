@@ -485,10 +485,22 @@ function initializeWhatsAppClient() {
 
         const phone = sender.split('@')[0];
         const incomingText = msg.body.trim().toLowerCase();
-        console.log(`Received message from ${isGroup ? 'group ' + msg.from + ' (author: ' + sender + ')' : msg.from}: "${msg.body}"`);
+
+        // Fetch contact details to see if it is a saved contact (personal name)
+        let displayName = phone;
+        try {
+            const contact = await msg.getContact();
+            if (contact && contact.name) {
+                displayName = contact.name;
+            }
+        } catch (err) {
+            console.error('Failed to get contact details:', err.message);
+        }
+
+        console.log(`Received message from ${isGroup ? 'group ' + msg.from + ' (author: ' + displayName + ')' : displayName}: "${msg.body}"`);
 
         // --- Log every incoming reply for the Excel report ---
-        logReply(phone, isGroup ? `[Group Chat] ${msg.body.trim()}` : msg.body.trim());
+        logReply(displayName, isGroup ? `[Group Chat] ${msg.body.trim()}` : msg.body.trim());
 
         // Check if chatbot is enabled before processing rules
         if (!chatbotConfig.enabled) return;
@@ -866,16 +878,10 @@ async function runAutomation(contacts, messageBody = null, minDelay = 6, maxDela
             }
 
             if (canSend) {
-                const sentMsg = await client.sendMessage(whatsappId, message);
+                await client.sendMessage(whatsappId, message);
                 activeAutomation.sent++;
                 io.emit('automation_log', { message: `Success: Message sent to ${name}.`, type: 'success' });
-                
-                // Record the actual resolved JID returned by WhatsApp
-                if (sentMsg && sentMsg.to) {
-                    recordTargetedContact(sentMsg.to);
-                } else {
-                    recordTargetedContact(whatsappId);
-                }
+                recordTargetedContact(whatsappId);
             }
         } catch (err) {
             activeAutomation.failed++;
