@@ -101,7 +101,7 @@ let whatsappClientReady = false;
 let lastQrCodeData = null;
 let activeAutomation = null; // Stores running automation state
 let shouldStopAutomation = false;
-let currentCronJob = null;
+let activeCronJobs = new Map();
 
 // === IN-MEMORY DEBUG LOG (viewable from browser via /api/debug-log) ===
 const debugLogEntries = [];
@@ -177,10 +177,8 @@ function resolveToPhone(jid) {
 
 // Schedule Configuration state
 let scheduleConfig = {
-    enabled: false,
-    time: '07:00',
-    contacts: [],
-    message: ''
+    enabled: true,
+    schedules: []
 };
 
 // Chatbot Configuration state
@@ -221,7 +219,25 @@ if (fs.existsSync(SCHEDULE_FILE)) {
     try {
         const raw = fs.readFileSync(SCHEDULE_FILE, 'utf8');
         scheduleConfig = JSON.parse(raw);
-        console.log('Loaded schedule configuration:', scheduleConfig.enabled ? `Active at ${scheduleConfig.time}` : 'Disabled');
+        
+        // Migrate old format to multi-schedule format
+        if (!scheduleConfig.schedules) {
+            scheduleConfig.schedules = [];
+            if (scheduleConfig.time || scheduleConfig.contacts) {
+                scheduleConfig.schedules.push({
+                    id: 'default-' + Date.now(),
+                    name: 'Default Schedule',
+                    enabled: scheduleConfig.enabled !== undefined ? scheduleConfig.enabled : true,
+                    time: scheduleConfig.time || '07:00',
+                    timezone: scheduleConfig.timezone || 'UTC',
+                    contacts: scheduleConfig.contacts || [],
+                    message: scheduleConfig.message || ''
+                });
+            }
+            // Ensure global enabled defaults to true now that schedules have individual enable flags
+            scheduleConfig.enabled = true;
+        }
+        console.log(`Loaded schedule configuration: ${scheduleConfig.schedules.length} schedules registered.`);
     } catch (e) {
         console.error('Error reading schedule.json:', e.message);
     }
@@ -277,19 +293,24 @@ function recordTargetedContact(id) {
 }
 
 function updateTargetedFromSchedule() {
-    if (scheduleConfig && scheduleConfig.contacts) {
-        scheduleConfig.contacts.forEach(c => {
-            const rawPhone = c.phone.toString().trim();
-            let whatsappId;
-            if (rawPhone.endsWith('@g.us')) {
-                whatsappId = rawPhone;
-            } else if (rawPhone.endsWith('@c.us')) {
-                whatsappId = rawPhone;
-            } else {
-                const cleanPhone = rawPhone.replace(/[^0-9]/g, '');
-                whatsappId = `${cleanPhone}@c.us`;
+    if (scheduleConfig && scheduleConfig.schedules) {
+        scheduleConfig.schedules.forEach(schedule => {
+            if (!schedule.enabled) return;
+            if (schedule.contacts) {
+                schedule.contacts.forEach(c => {
+                    const rawPhone = c.phone.toString().trim();
+                    let whatsappId;
+                    if (rawPhone.endsWith('@g.us')) {
+                        whatsappId = rawPhone;
+                    } else if (rawPhone.endsWith('@c.us') || rawPhone.endsWith('@lid')) {
+                        whatsappId = rawPhone;
+                    } else {
+                        const cleanPhone = rawPhone.replace(/[^0-9]/g, '');
+                        whatsappId = `${cleanPhone}@c.us`;
+                    }
+                    recordTargetedContact(whatsappId);
+                });
             }
-            recordTargetedContact(whatsappId);
         });
     }
 }
@@ -1195,44 +1216,54 @@ async function runAutomation(contacts, messageBody = null, minDelay = 6, maxDela
 
 // Manage Cron Jobs based on scheduleConfig
 function applySchedule() {
-    if (currentCronJob) {
-        currentCronJob.stop();
-        currentCronJob = null;
-    }
+    // Stop and clear all existing cron jobs
+    activeCronJobs.forEach((job) => {
+        if (job) job.stop();
+    });
+    activeCronJobs.clear();
 
     // Load schedule contacts into the targeted list so their replies are tracked
     updateTargetedFromSchedule();
 
-    if (!scheduleConfig.enabled || !scheduleConfig.time) {
-        console.log('Daily schedule is disabled.');
+    if (!scheduleConfig || !scheduleConfig.schedules) {
+        console.log('No schedules configured.');
         return;
     }
 
-    const [hourStr, minuteStr] = scheduleConfig.time.split(':');
-    const hour = parseInt(hourStr, 10);
-    const minute = parseInt(minuteStr, 10);
-
-    if (isNaN(hour) || isNaN(minute)) {
-        console.error('Invalid schedule time formatted in configuration.');
-        return;
-    }
-
-    const cronExpression = `${minute} ${hour} * * *`;
-    const tz = scheduleConfig.timezone || 'UTC';
-    console.log(`Scheduling daily cron job: ${cronExpression} (at ${scheduleConfig.time} in timezone ${tz})`);
-
-    currentCronJob = cron.schedule(cronExpression, () => {
-        console.log('Daily scheduled automation triggered!');
-        io.emit('automation_log', { message: '⏰ Daily scheduled automation triggered!', type: 'system' });
-        
-        if (scheduleConfig.contacts && scheduleConfig.contacts.length > 0) {
-            runAutomation(scheduleConfig.contacts, scheduleConfig.message, 6, 12, true);
-        } else {
-            io.emit('automation_log', { message: 'Schedule triggered, but contacts list is empty!', type: 'error' });
+    scheduleConfig.schedules.forEach(schedule => {
+        if (!schedule.enabled || !schedule.time) {
+            console.log(`Schedule "${schedule.name || 'Unnamed'}" is disabled.`);
+            return;
         }
-    }, {
-        scheduled: true,
-        timezone: tz
+
+        const [hourStr, minuteStr] = schedule.time.split(':');
+        const hour = parseInt(hourStr, 10);
+        const minute = parseInt(minuteStr, 10);
+
+        if (isNaN(hour) || isNaN(minute)) {
+            console.error(`Invalid schedule time formatted in schedule: ${schedule.name || 'Unnamed'}`);
+            return;
+        }
+
+        const cronExpression = `${minute} ${hour} * * *`;
+        const tz = schedule.timezone || 'UTC';
+        console.log(`Scheduling daily cron job for "${schedule.name || 'Unnamed'}": ${cronExpression} (at ${schedule.time} in timezone ${tz})`);
+
+        const job = cron.schedule(cronExpression, () => {
+            console.log(`Scheduled automation "${schedule.name || 'Unnamed'}" triggered!`);
+            io.emit('automation_log', { message: `⏰ Scheduled automation "${schedule.name || 'Unnamed'}" triggered!`, type: 'system' });
+            
+            if (schedule.contacts && schedule.contacts.length > 0) {
+                runAutomation(schedule.contacts, schedule.message, 6, 12, true);
+            } else {
+                io.emit('automation_log', { message: `Schedule "${schedule.name || 'Unnamed'}" triggered, but contacts list is empty!`, type: 'error' });
+            }
+        }, {
+            scheduled: true,
+            timezone: tz
+        });
+
+        activeCronJobs.set(schedule.id, job);
     });
 }
 
@@ -1278,22 +1309,19 @@ io.on('connection', (socket) => {
     // Save schedule configuration
     socket.on('save_schedule', (config) => {
         scheduleConfig = {
-            enabled: config.enabled,
-            time: config.time || '07:00',
-            contacts: config.contacts || [],
-            message: config.message || '',
-            timezone: config.timezone || 'UTC'
+            enabled: config.enabled !== undefined ? config.enabled : true,
+            schedules: config.schedules || []
         };
 
         try {
             fs.writeFileSync(SCHEDULE_FILE, JSON.stringify(scheduleConfig, null, 2));
-            console.log('Saved schedule configuration.');
+            console.log('Saved multi-schedule configuration.');
             applySchedule();
             io.emit('schedule_update', scheduleConfig);
-            socket.emit('automation_log', { message: 'Schedule config saved successfully!', type: 'success' });
+            socket.emit('automation_log', { message: 'Schedules saved successfully!', type: 'success' });
         } catch (err) {
             console.error('Failed to write schedule.json:', err.message);
-            socket.emit('automation_log', { message: `Failed to save schedule: ${err.message}`, type: 'error' });
+            socket.emit('automation_log', { message: `Failed to save schedules: ${err.message}`, type: 'error' });
         }
     });
 

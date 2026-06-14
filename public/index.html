@@ -162,45 +162,27 @@
 
                     <!-- Tab Content: Schedule -->
                     <div class="tab-content" id="tab-schedule">
-                        <div class="schedule-status-banner" id="schedule-banner">
-                            <i class="fas fa-bell"></i>
-                            <span id="schedule-banner-text">Scheduler Status: Disabled</span>
-                        </div>
-
-                        <div class="field-header-row" style="margin-top: 1rem;">
-                            <p class="field-desc">Set up an automatic daily broadcast. Format: <code>Phone|Name</code> (One per line). Name is optional.</p>
-                            <div style="display: flex; gap: 0.5rem;">
-                                <button class="btn btn-secondary btn-sm" onclick="openGroupModal('schedule')">
-                                    <i class="fas fa-users"></i> Add Group
-                                </button>
-                                <button class="btn btn-secondary btn-sm" onclick="openContactModal('schedule')">
-                                    <i class="fas fa-user-plus"></i> Add Contact
-                                </button>
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+                            <div>
+                                <h3 style="font-size: 1.1rem; color: var(--text-primary); margin: 0; font-family: var(--font-heading);">Scheduled Events</h3>
+                                <p style="font-size: 0.8rem; color: var(--text-secondary); margin: 0; margin-top: 0.25rem;">Manage recurring daily automated messages</p>
                             </div>
-                        </div>
-                        <textarea id="schedule-contacts" placeholder="972500000000|John Doe&#10;972500000001|Jane Smith" style="height: 120px;"></textarea>
-
-                        <div class="form-group" style="margin-bottom: 1rem;">
-                            <label for="schedule-message">Broadcast Message</label>
-                            <textarea id="schedule-message" placeholder="Type the message that will be broadcasted to all above contacts daily..." style="height: 80px; font-family: inherit;"></textarea>
+                            <button class="btn btn-primary btn-sm" onclick="openScheduleModal()" style="display: flex; align-items: center; gap: 0.5rem; padding: 0.6rem 1.2rem; font-size: 0.85rem; border-radius: 8px;">
+                                <i class="fas fa-plus"></i> Create Schedule
+                            </button>
                         </div>
 
-                        <div class="options-grid">
-                            <div class="form-group">
-                                <label for="schedule-time">Trigger Time (Every day)</label>
-                                <input type="time" id="schedule-time" value="07:00">
-                            </div>
-                            <div class="form-group" style="justify-content: flex-end;">
-                                <label style="opacity: 0;">Toggle</label>
-                                <button class="btn btn-block" id="btn-toggle-schedule" style="background: rgba(255,255,255,0.05); color: var(--text-secondary); border: 1px solid var(--border-color);">
-                                    Enable Schedule
-                                </button>
-                            </div>
+                        <!-- Schedule List Container -->
+                        <div id="schedules-container" class="schedules-grid">
+                            <!-- Dynamic schedule cards will be appended here -->
                         </div>
 
-                        <button class="btn btn-primary btn-block" id="btn-save-schedule">
-                            <i class="fas fa-save"></i> Save Schedule Configuration
-                        </button>
+                        <div id="schedules-empty" class="groups-empty-state" style="display: none; flex-direction: column; align-items: center; padding: 3rem 1.5rem; background: rgba(255,255,255,0.01); border: 1px dashed var(--border-color); border-radius: 12px; margin-top: 1rem; text-align: center;">
+                            <i class="fas fa-calendar-alt" style="font-size: 2.5rem; color: var(--text-secondary); margin-bottom: 1rem;"></i>
+                            <h4 style="font-size: 0.95rem; color: var(--text-primary); margin: 0; font-weight: 600;">No Schedules Created</h4>
+                            <p style="font-size: 0.8rem; color: var(--text-secondary); margin: 0.5rem 0 1.25rem 0; max-width: 250px;">Set up automatic daily WhatsApp messages to your contacts or groups.</p>
+                            <button class="btn btn-secondary btn-sm" onclick="openScheduleModal()">Get Started</button>
+                        </div>
                     </div>
 
                     <!-- Tab Content: Chatbot -->
@@ -335,7 +317,7 @@
         let isProcessing = false;
         let csvContactsList = [];
         let currentTab = 'paste';
-        let isScheduleActive = false;
+        let scheduleConfig = { enabled: true, schedules: [] };
         let isChatbotActive = true;
 
         // UI Elements
@@ -367,10 +349,6 @@
         const scheduleContacts = document.getElementById('schedule-contacts');
         const scheduleMessage = document.getElementById('schedule-message');
         const scheduleTime = document.getElementById('schedule-time');
-        const btnToggleSchedule = document.getElementById('btn-toggle-schedule');
-        const btnSaveSchedule = document.getElementById('btn-save-schedule');
-        const scheduleBanner = document.getElementById('schedule-banner');
-        const scheduleBannerText = document.getElementById('schedule-banner-text');
 
         // Chatbot Elements
         const rulesContainer = document.getElementById('rules-container');
@@ -468,26 +446,6 @@
             consoleLog.innerHTML = '<div class="log-entry system">Console cleared.</div>';
         });
 
-        // Toggle schedule
-        btnToggleSchedule.addEventListener('click', () => {
-            isScheduleActive = !isScheduleActive;
-            updateScheduleToggleUI();
-        });
-
-        function updateScheduleToggleUI() {
-            if (isScheduleActive) {
-                btnToggleSchedule.textContent = 'Active (Disable)';
-                btnToggleSchedule.style.background = 'rgba(16, 185, 129, 0.1)';
-                btnToggleSchedule.style.color = 'var(--primary)';
-                btnToggleSchedule.style.borderColor = 'rgba(16, 185, 129, 0.3)';
-            } else {
-                btnToggleSchedule.textContent = 'Disabled (Enable)';
-                btnToggleSchedule.style.background = 'rgba(255, 255, 255, 0.05)';
-                btnToggleSchedule.style.color = 'var(--text-secondary)';
-                btnToggleSchedule.style.borderColor = 'var(--border-color)';
-            }
-        }
-
         // Toggle Chatbot
         btnToggleChatbot.addEventListener('click', () => {
             isChatbotActive = !isChatbotActive;
@@ -553,31 +511,6 @@
             socket.emit('save_chatbot_rules', config);
         });
 
-        // Save Schedule Config
-        btnSaveSchedule.addEventListener('click', () => {
-            const lines = scheduleContacts.value.trim().split('\n');
-            const contacts = [];
-            lines.forEach(line => {
-                const parts = line.split('|');
-                if (parts[0]) {
-                    contacts.push({
-                        phone: parts[0].trim(),
-                        name: parts[1] ? parts[1].trim() : ''
-                    });
-                }
-            });
-
-            const config = {
-                enabled: isScheduleActive,
-                time: scheduleTime.value,
-                contacts: contacts,
-                message: scheduleMessage.value.trim(),
-                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
-            };
-
-            socket.emit('save_schedule', config);
-        });
-
         // Socket Events
         socket.on('connect', () => {
             connectionStatus.className = 'status-badge connected';
@@ -629,25 +562,8 @@
 
         // Receive schedule updates
         socket.on('schedule_update', (config) => {
-            isScheduleActive = config.enabled;
-            scheduleTime.value = config.time || '07:00';
-            scheduleMessage.value = config.message || '';
-            
-            if (config.contacts && Array.isArray(config.contacts)) {
-                scheduleContacts.value = config.contacts
-                    .map(c => c.name ? `${c.phone}|${c.name}` : c.phone)
-                    .join('\n');
-            }
-
-            updateScheduleToggleUI();
-
-            if (isScheduleActive) {
-                scheduleBanner.className = 'schedule-status-banner active';
-                scheduleBannerText.textContent = `Scheduler Status: Active (Triggers daily at ${config.time})`;
-            } else {
-                scheduleBanner.className = 'schedule-status-banner';
-                scheduleBannerText.textContent = 'Scheduler Status: Disabled';
-            }
+            scheduleConfig = config || { enabled: true, schedules: [] };
+            renderSchedules(scheduleConfig.schedules);
         });
 
         // Receive chatbot config updates
@@ -1256,15 +1172,174 @@
             closeContactModal();
         }
 
+        // Schedule Picker Modal Logic
+        function openScheduleModal(scheduleId = null) {
+            document.getElementById('schedule-modal').style.display = 'flex';
+            
+            if (scheduleId) {
+                // Edit Mode
+                const schedule = scheduleConfig.schedules.find(s => s.id === scheduleId);
+                if (schedule) {
+                    document.getElementById('schedule-modal-title').innerHTML = `<i class="fas fa-edit"></i> Edit Scheduled Event`;
+                    document.getElementById('edit-schedule-id').value = schedule.id;
+                    document.getElementById('schedule-name').value = schedule.name || '';
+                    document.getElementById('schedule-time').value = schedule.time || '07:00';
+                    document.getElementById('schedule-timezone').value = schedule.timezone || 'UTC';
+                    document.getElementById('schedule-enabled').checked = schedule.enabled !== false;
+                    document.getElementById('schedule-message').value = schedule.message || '';
+                    
+                    if (schedule.contacts && Array.isArray(schedule.contacts)) {
+                        document.getElementById('schedule-contacts').value = schedule.contacts
+                            .map(c => c.name ? `${c.phone}|${c.name}` : c.phone)
+                            .join('\n');
+                    } else {
+                        document.getElementById('schedule-contacts').value = '';
+                    }
+                }
+            } else {
+                // Create Mode
+                document.getElementById('schedule-modal-title').innerHTML = `<i class="fas fa-clock"></i> Create Scheduled Event`;
+                document.getElementById('edit-schedule-id').value = '';
+                document.getElementById('schedule-name').value = '';
+                document.getElementById('schedule-time').value = '07:00';
+                document.getElementById('schedule-timezone').value = 'UTC';
+                document.getElementById('schedule-enabled').checked = true;
+                document.getElementById('schedule-message').value = '';
+                document.getElementById('schedule-contacts').value = '';
+            }
+        }
+
+        function closeScheduleModal() {
+            document.getElementById('schedule-modal').style.display = 'none';
+        }
+
+        function saveActiveSchedule() {
+            const id = document.getElementById('edit-schedule-id').value;
+            const name = document.getElementById('schedule-name').value.trim() || 'Unnamed Schedule';
+            const time = document.getElementById('schedule-time').value;
+            const timezone = document.getElementById('schedule-timezone').value;
+            const enabled = document.getElementById('schedule-enabled').checked;
+            const message = document.getElementById('schedule-message').value.trim();
+            const contactsRaw = document.getElementById('schedule-contacts').value.trim();
+
+            const lines = contactsRaw ? contactsRaw.split('\n') : [];
+            const contacts = [];
+            lines.forEach(line => {
+                const parts = line.split('|');
+                if (parts[0]) {
+                    contacts.push({
+                        phone: parts[0].trim(),
+                        name: parts[1] ? parts[1].trim() : ''
+                    });
+                }
+            });
+
+            const scheduleData = {
+                id: id || 'sch-' + Date.now(),
+                name,
+                time,
+                timezone,
+                enabled,
+                message,
+                contacts
+            };
+
+            if (id) {
+                // Update existing
+                const idx = scheduleConfig.schedules.findIndex(s => s.id === id);
+                if (idx !== -1) {
+                    scheduleConfig.schedules[idx] = scheduleData;
+                }
+            } else {
+                // Add new
+                scheduleConfig.schedules.push(scheduleData);
+            }
+
+            // Save configuration
+            socket.emit('save_schedule', scheduleConfig);
+            closeScheduleModal();
+        }
+
+        function deleteSchedule(scheduleId) {
+            if (confirm('Are you sure you want to delete this schedule?')) {
+                scheduleConfig.schedules = scheduleConfig.schedules.filter(s => s.id !== scheduleId);
+                socket.emit('save_schedule', scheduleConfig);
+            }
+        }
+
+        function toggleScheduleStatus(scheduleId) {
+            const schedule = scheduleConfig.schedules.find(s => s.id === scheduleId);
+            if (schedule) {
+                schedule.enabled = !schedule.enabled;
+                socket.emit('save_schedule', scheduleConfig);
+            }
+        }
+
+        function renderSchedules(schedulesList) {
+            const container = document.getElementById('schedules-container');
+            const emptyState = document.getElementById('schedules-empty');
+            
+            container.innerHTML = '';
+            
+            if (!schedulesList || schedulesList.length === 0) {
+                emptyState.style.display = 'flex';
+                return;
+            }
+            
+            emptyState.style.display = 'none';
+            
+            schedulesList.forEach(schedule => {
+                const card = document.createElement('div');
+                card.className = 'schedule-card';
+                
+                const contactsCount = schedule.contacts ? schedule.contacts.length : 0;
+                const statusBadgeClass = schedule.enabled ? 'badge badge-active' : 'badge badge-inactive';
+                const statusText = schedule.enabled ? 'Active' : 'Disabled';
+                const toggleIcon = schedule.enabled ? 'fa-pause' : 'fa-play';
+                const toggleTitle = schedule.enabled ? 'Pause' : 'Activate';
+                
+                card.innerHTML = `
+                    <div>
+                        <div class="schedule-card-header">
+                            <h4 class="schedule-card-title">${escapeHtml(schedule.name || 'Unnamed Schedule')}</h4>
+                            <span class="${statusBadgeClass}">${statusText}</span>
+                        </div>
+                        <div class="schedule-card-time" style="margin-top: 0.5rem;">
+                            <i class="fas fa-clock"></i> ${schedule.time} (${schedule.timezone || 'UTC'})
+                        </div>
+                        <div class="schedule-card-meta" style="margin-top: 0.5rem;">
+                            <i class="fas fa-users"></i> ${contactsCount} Target${contactsCount === 1 ? '' : 's'}
+                        </div>
+                    </div>
+                    <div class="schedule-card-actions">
+                        <button class="btn btn-secondary btn-sm" onclick="openScheduleModal('${schedule.id}')" style="flex: 1; padding: 0.4rem; font-size: 0.8rem;">
+                            <i class="fas fa-edit"></i> Edit
+                        </button>
+                        <button class="btn btn-secondary btn-sm" onclick="toggleScheduleStatus('${schedule.id}')" style="flex: 1; padding: 0.4rem; font-size: 0.8rem;" title="${toggleTitle}">
+                            <i class="fas ${toggleIcon}"></i> ${schedule.enabled ? 'Pause' : 'Start'}
+                        </button>
+                        <button class="btn btn-secondary btn-sm" onclick="deleteSchedule('${schedule.id}')" style="background: rgba(239, 68, 68, 0.1); color: var(--danger); border-color: rgba(239, 68, 68, 0.2); padding: 0.4rem; font-size: 0.8rem;">
+                            <i class="fas fa-trash-alt"></i>
+                        </button>
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+        }
+
         // Close modal when clicking outside of modal content
         window.addEventListener('click', (event) => {
             const groupModal = document.getElementById('group-modal');
             const contactModal = document.getElementById('contact-modal');
+            const scheduleModal = document.getElementById('schedule-modal');
             if (event.target === groupModal) {
                 closeGroupModal();
             }
             if (event.target === contactModal) {
                 closeContactModal();
+            }
+            if (event.target === scheduleModal) {
+                closeScheduleModal();
             }
         });
     </script>
@@ -1344,6 +1419,83 @@
                 <button class="btn btn-secondary btn-sm" onclick="closeContactModal()">Cancel</button>
                 <button class="btn btn-primary btn-sm" id="btn-add-selected-contacts" onclick="addSelectedContacts()">
                     <i class="fas fa-plus-circle"></i> Add Selected Contacts (<span id="selected-contacts-count">0</span>)
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Schedule Editor Modal -->
+    <div id="schedule-modal" class="modal-overlay">
+        <div class="modal-content" style="max-width: 550px;">
+            <div class="modal-header">
+                <h3 id="schedule-modal-title"><i class="fas fa-clock"></i> Create Scheduled Event</h3>
+                <button class="modal-close" onclick="closeScheduleModal()">&times;</button>
+            </div>
+            <div class="modal-body" style="gap: 1.25rem;">
+                <input type="hidden" id="edit-schedule-id">
+
+                <!-- Schedule Name -->
+                <div class="form-group">
+                    <label for="schedule-name" style="font-weight: 500; margin-bottom: 0.5rem; display: block; font-size: 0.85rem; color: var(--text-primary);">Schedule Name</label>
+                    <input type="text" id="schedule-name" placeholder="e.g. Morning Greetings" style="width: 100%; padding: 0.75rem 1rem; background: rgba(0, 0, 0, 0.3); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-primary); outline: none;">
+                </div>
+
+                <!-- Contacts -->
+                <div class="form-group">
+                    <div class="field-header-row" style="margin-bottom: 0.5rem;">
+                        <label style="font-weight: 500; margin-bottom: 0; display: block; font-size: 0.85rem; color: var(--text-primary);">Target Contacts</label>
+                        <div style="display: flex; gap: 0.5rem;">
+                            <button class="btn btn-secondary btn-sm" onclick="openGroupModal('schedule')">
+                                <i class="fas fa-users"></i> Add Group
+                            </button>
+                            <button class="btn btn-secondary btn-sm" onclick="openContactModal('schedule')">
+                                <i class="fas fa-user-plus"></i> Add Contact
+                            </button>
+                        </div>
+                    </div>
+                    <textarea id="schedule-contacts" placeholder="972500000000|John Doe&#10;972500000001|Jane Smith" style="height: 100px; width: 100%; padding: 0.75rem; background: rgba(0, 0, 0, 0.3); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-primary); outline: none; font-family: inherit; font-size: 0.85rem; resize: vertical;"></textarea>
+                </div>
+
+                <!-- Message -->
+                <div class="form-group">
+                    <label for="schedule-message" style="font-weight: 500; margin-bottom: 0.5rem; display: block; font-size: 0.85rem; color: var(--text-primary);">Default Message</label>
+                    <textarea id="schedule-message" placeholder="Type the message to broadcast daily..." style="height: 80px; width: 100%; padding: 0.75rem; background: rgba(0, 0, 0, 0.3); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-primary); outline: none; font-family: inherit; font-size: 0.85rem; resize: vertical;"></textarea>
+                </div>
+
+                <!-- Time & Timezone Grid -->
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                    <div class="form-group">
+                        <label for="schedule-time" style="font-weight: 500; margin-bottom: 0.5rem; display: block; font-size: 0.85rem; color: var(--text-primary);">Trigger Time (Daily)</label>
+                        <input type="time" id="schedule-time" value="07:00" style="width: 100%; padding: 0.75rem; background: rgba(0, 0, 0, 0.3); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-primary); outline: none; font-size: 0.9rem;">
+                    </div>
+                    <div class="form-group">
+                        <label for="schedule-timezone" style="font-weight: 500; margin-bottom: 0.5rem; display: block; font-size: 0.85rem; color: var(--text-primary);">Timezone</label>
+                        <select id="schedule-timezone" style="width: 100%; padding: 0.75rem; background: rgba(0, 0, 0, 0.3); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-primary); outline: none; font-size: 0.9rem; height: 45px;">
+                            <option value="UTC">UTC</option>
+                            <option value="Local">Local (Server Time)</option>
+                            <option value="Asia/Jerusalem">Israel (Asia/Jerusalem)</option>
+                            <option value="America/New_York">EST (New York)</option>
+                            <option value="Europe/London">GMT (London)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Enabled Toggle -->
+                <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); padding: 0.75rem 1rem; border-radius: 8px;">
+                    <span style="font-weight: 500; font-size: 0.9rem; color: var(--text-primary); display: flex; align-items: center; gap: 0.5rem;">
+                        <i class="fas fa-power-off" style="color: var(--primary);"></i> Enable Scheduled Event
+                    </span>
+                    <label class="switch-container">
+                        <input type="checkbox" id="schedule-enabled" checked>
+                        <span class="switch-slider"></span>
+                    </label>
+                </div>
+            </div>
+            <!-- Modal Footer -->
+            <div class="modal-footer">
+                <button class="btn btn-secondary btn-sm" onclick="closeScheduleModal()">Cancel</button>
+                <button class="btn btn-primary btn-sm" onclick="saveActiveSchedule()">
+                    <i class="fas fa-save"></i> Save Schedule
                 </button>
             </div>
         </div>
