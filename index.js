@@ -1020,8 +1020,16 @@ app.get('/api/contacts', async (req, res) => {
                             isMyContact = c.isMyContact;
                         }
 
+                        // Try to resolve phone JID if it is an LID contact
+                        let id = c.id._serialized;
+                        if (c.phoneNumber && c.phoneNumber._serialized) {
+                            id = c.phoneNumber._serialized;
+                        } else if (c.phoneNumber && typeof c.phoneNumber === 'string') {
+                            id = c.phoneNumber;
+                        }
+
                         return {
-                            id: c.id._serialized,
+                            id: id,
                             name: name || 'Unnamed Contact',
                             isMyContact: !!isMyContact
                         };
@@ -1031,14 +1039,47 @@ app.get('/api/contacts', async (req, res) => {
             }
         });
 
+        // Deduplicate and filter contacts in Node.js
+        const uniqueContactsMap = new Map();
+        for (const contact of contacts) {
+            // Only keep standard phone number formats (@c.us)
+            if (!contact.id || !contact.id.endsWith('@c.us')) continue;
+
+            const nameTrim = contact.name.trim();
+            const nameLower = nameTrim.toLowerCase();
+
+            // Filter out unnamed contacts
+            if (!nameTrim || nameLower === 'unnamed contact') continue;
+
+            // Filter out ME app spam contacts (e.g. Me - Name, Me: Name, Me Name)
+            if (nameLower.startsWith('me -') || nameLower.startsWith('me-') || nameLower.startsWith('me :') || nameLower.startsWith('me:') || nameLower.startsWith('me ')) {
+                continue;
+            }
+
+            // Filter out contacts with "spam" in their name
+            if (nameLower.includes('spam')) continue;
+
+            // Deduplicate: if duplicate, prefer the saved (isMyContact) one
+            if (uniqueContactsMap.has(contact.id)) {
+                const existing = uniqueContactsMap.get(contact.id);
+                if (contact.isMyContact && !existing.isMyContact) {
+                    uniqueContactsMap.set(contact.id, contact);
+                }
+            } else {
+                uniqueContactsMap.set(contact.id, contact);
+            }
+        }
+
+        const filteredContacts = Array.from(uniqueContactsMap.values());
+
         // Sort contacts: saved contacts first, then alphabetically by name
-        contacts.sort((a, b) => {
+        filteredContacts.sort((a, b) => {
             if (a.isMyContact && !b.isMyContact) return -1;
             if (!a.isMyContact && b.isMyContact) return 1;
             return a.name.localeCompare(b.name);
         });
 
-        res.json({ contacts });
+        res.json({ contacts: filteredContacts });
     } catch (err) {
         console.error('Error fetching contacts:', err.message);
         res.status(500).json({ error: 'Failed to fetch contacts: ' + err.message });
