@@ -1314,4 +1314,9 @@ textarea:focus {
     color: #ef4444;
 }
 
+/* Modal Stacking Order Fixes */
+#group-modal, #contact-modal {
+    z-index: 1100; /* Ensure selectors display on top of the Scheduler Modal (z-index 1000) */
+}
+
 
