@@ -1065,11 +1065,22 @@
         // Contact Picker Logic
         let activeContactTarget = ''; // 'paste' or 'schedule'
         let cachedContacts = [];
+        let selectedContacts = new Map(); // Tracks selected contacts in multi-select mode: id -> name
+        let isContactMultiSelect = false;
 
         function openContactModal(target) {
             activeContactTarget = target;
             document.getElementById('contact-modal').style.display = 'flex';
             document.getElementById('contact-modal-search').value = '';
+            
+            // Sync isContactMultiSelect with toggle checkbox
+            const toggle = document.getElementById('contact-multi-select-toggle');
+            isContactMultiSelect = toggle.checked;
+            selectedContacts.clear();
+            
+            // Show/hide footer and reset count
+            document.getElementById('contacts-modal-footer').style.display = isContactMultiSelect ? 'flex' : 'none';
+            document.getElementById('selected-contacts-count').textContent = '0';
             
             // Show loading state
             document.getElementById('contacts-loading').style.display = 'flex';
@@ -1101,6 +1112,31 @@
             document.getElementById('contact-modal').style.display = 'none';
         }
 
+        function toggleMultiSelectMode() {
+            const toggle = document.getElementById('contact-multi-select-toggle');
+            isContactMultiSelect = toggle.checked;
+            selectedContacts.clear();
+            
+            // Show/hide footer
+            const footer = document.getElementById('contacts-modal-footer');
+            footer.style.display = isContactMultiSelect ? 'flex' : 'none';
+            document.getElementById('selected-contacts-count').textContent = '0';
+            
+            // Re-render contacts to show checkboxes instead of "Select" buttons
+            renderContacts(cachedContacts);
+        }
+
+        function toggleContactSelection(contactId, contactName, liElement) {
+            if (selectedContacts.has(contactId)) {
+                selectedContacts.delete(contactId);
+                liElement.classList.remove('selected');
+            } else {
+                selectedContacts.set(contactId, contactName);
+                liElement.classList.add('selected');
+            }
+            document.getElementById('selected-contacts-count').textContent = selectedContacts.size;
+        }
+
         function renderContacts(contacts) {
             const listElement = document.getElementById('contacts-list');
             listElement.innerHTML = '';
@@ -1116,11 +1152,23 @@
                 const li = document.createElement('li');
                 li.className = 'group-item';
                 
+                const isSelected = selectedContacts.has(contact.id);
+                if (isContactMultiSelect && isSelected) {
+                    li.classList.add('selected');
+                }
+                
                 const initials = contact.name.substring(0, 2).toUpperCase() || 'CN';
                 const cleanPhone = contact.id.split('@')[0];
                 const badge = contact.isMyContact 
                     ? `<span style="font-size: 0.7rem; color: #128c7e; background: rgba(18, 140, 126, 0.15); padding: 0.1rem 0.4rem; border-radius: 4px; margin-left: 0.5rem; font-weight: 500;">Saved</span>` 
                     : '';
+
+                let actionHtml = '';
+                if (isContactMultiSelect) {
+                    actionHtml = `<div class="checkbox-circle"></div>`;
+                } else {
+                    actionHtml = `<span class="group-action">Select</span>`;
+                }
 
                 li.innerHTML = `
                     <div class="group-info">
@@ -1130,10 +1178,16 @@
                             <span class="group-id">${cleanPhone}</span>
                         </div>
                     </div>
-                    <span class="group-action">Select</span>
+                    ${actionHtml}
                 `;
                 
-                li.addEventListener('click', () => selectContact(contact.id, contact.name));
+                li.addEventListener('click', () => {
+                    if (isContactMultiSelect) {
+                        toggleContactSelection(contact.id, contact.name, li);
+                    } else {
+                        selectContact(contact.id, contact.name);
+                    }
+                });
                 listElement.appendChild(li);
             });
         }
@@ -1168,6 +1222,37 @@
                 textarea.dispatchEvent(new Event('input'));
             }
             
+            closeContactModal();
+        }
+
+        function addSelectedContacts() {
+            if (selectedContacts.size === 0) {
+                closeContactModal();
+                return;
+            }
+
+            let textarea;
+            if (activeContactTarget === 'paste') {
+                textarea = document.getElementById('contacts-input');
+            } else if (activeContactTarget === 'schedule') {
+                textarea = document.getElementById('schedule-contacts');
+            }
+
+            if (textarea) {
+                const currentValue = textarea.value.trim();
+                const newEntries = Array.from(selectedContacts.entries())
+                    .map(([id, name]) => `${id}|${name}`)
+                    .join('\n');
+                
+                if (currentValue === '') {
+                    textarea.value = newEntries;
+                } else {
+                    textarea.value = currentValue + '\n' + newEntries;
+                }
+                
+                textarea.dispatchEvent(new Event('input'));
+            }
+
             closeContactModal();
         }
 
@@ -1222,7 +1307,18 @@
                 <h3><i class="fas fa-user-plus"></i> Select WhatsApp Contact</h3>
                 <button class="modal-close" onclick="closeContactModal()">&times;</button>
             </div>
-            <div class="modal-body">
+            <div class="modal-body" style="padding-bottom: 0.5rem;">
+                <!-- Multi-Select Toggle Switch -->
+                <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); padding: 0.75rem 1rem; border-radius: 8px; margin-bottom: 0.5rem;">
+                    <span style="font-weight: 500; font-size: 0.9rem; color: var(--text-primary); display: flex; align-items: center; gap: 0.5rem;">
+                        <i class="fas fa-tasks" style="color: var(--primary);"></i> Multi-Select Mode
+                    </span>
+                    <label class="switch-container">
+                        <input type="checkbox" id="contact-multi-select-toggle" onchange="toggleMultiSelectMode()">
+                        <span class="switch-slider"></span>
+                    </label>
+                </div>
+
                 <div class="modal-search-wrapper">
                     <i class="fas fa-search search-icon"></i>
                     <input type="text" id="contact-modal-search" placeholder="Search contacts..." oninput="filterContacts()">
@@ -1242,6 +1338,13 @@
                 <ul id="contacts-list" class="groups-list">
                     <!-- Dynamic contact items will be appended here -->
                 </ul>
+            </div>
+            <!-- Multi-Select Footer -->
+            <div id="contacts-modal-footer" class="modal-footer" style="display: none;">
+                <button class="btn btn-secondary btn-sm" onclick="closeContactModal()">Cancel</button>
+                <button class="btn btn-primary btn-sm" id="btn-add-selected-contacts" onclick="addSelectedContacts()">
+                    <i class="fas fa-plus-circle"></i> Add Selected Contacts (<span id="selected-contacts-count">0</span>)
+                </button>
             </div>
         </div>
     </div>
