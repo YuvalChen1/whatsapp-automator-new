@@ -105,9 +105,14 @@
                     <div class="tab-content active" id="tab-paste">
                         <div class="field-header-row">
                             <p class="field-desc">Enter phone numbers (with country code, e.g., 972500000000) and message content. Format: <code>Phone|Name|Custom Message</code> (One per line). Name and message are optional.</p>
-                            <button class="btn btn-secondary btn-sm" onclick="openGroupModal('paste')">
-                                <i class="fas fa-users"></i> Add Group
-                            </button>
+                            <div style="display: flex; gap: 0.5rem;">
+                                <button class="btn btn-secondary btn-sm" onclick="openGroupModal('paste')">
+                                    <i class="fas fa-users"></i> Add Group
+                                </button>
+                                <button class="btn btn-secondary btn-sm" onclick="openContactModal('paste')">
+                                    <i class="fas fa-user-plus"></i> Add Contact
+                                </button>
+                            </div>
                         </div>
                         <textarea id="contacts-input" placeholder="972500000000|John Doe|Hi John, testing automation!&#10;972500000001|Jane Smith|Hello Jane!"></textarea>
                         
@@ -164,9 +169,14 @@
 
                         <div class="field-header-row" style="margin-top: 1rem;">
                             <p class="field-desc">Set up an automatic daily broadcast. Format: <code>Phone|Name</code> (One per line). Name is optional.</p>
-                            <button class="btn btn-secondary btn-sm" onclick="openGroupModal('schedule')">
-                                <i class="fas fa-users"></i> Add Group
-                            </button>
+                            <div style="display: flex; gap: 0.5rem;">
+                                <button class="btn btn-secondary btn-sm" onclick="openGroupModal('schedule')">
+                                    <i class="fas fa-users"></i> Add Group
+                                </button>
+                                <button class="btn btn-secondary btn-sm" onclick="openContactModal('schedule')">
+                                    <i class="fas fa-user-plus"></i> Add Contact
+                                </button>
+                            </div>
                         </div>
                         <textarea id="schedule-contacts" placeholder="972500000000|John Doe&#10;972500000001|Jane Smith" style="height: 120px;"></textarea>
 
@@ -1052,11 +1062,124 @@
             return text.replace(/[&<>"']/g, function(m) { return map[m]; });
         }
 
+        // Contact Picker Logic
+        let activeContactTarget = ''; // 'paste' or 'schedule'
+        let cachedContacts = [];
+
+        function openContactModal(target) {
+            activeContactTarget = target;
+            document.getElementById('contact-modal').style.display = 'flex';
+            document.getElementById('contact-modal-search').value = '';
+            
+            // Show loading state
+            document.getElementById('contacts-loading').style.display = 'flex';
+            document.getElementById('contacts-error').style.display = 'none';
+            document.getElementById('contacts-empty').style.display = 'none';
+            document.getElementById('contacts-list').innerHTML = '';
+
+            fetch('/api/contacts')
+                .then(response => {
+                    if (!response.ok) {
+                        return response.json().then(err => { throw new Error(err.error || 'Server error') });
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    cachedContacts = data.contacts || [];
+                    document.getElementById('contacts-loading').style.display = 'none';
+                    renderContacts(cachedContacts);
+                })
+                .catch(err => {
+                    console.error('Error fetching contacts:', err);
+                    document.getElementById('contacts-loading').style.display = 'none';
+                    document.getElementById('contacts-error').style.display = 'flex';
+                    document.getElementById('contacts-error-msg').textContent = err.message;
+                });
+        }
+
+        function closeContactModal() {
+            document.getElementById('contact-modal').style.display = 'none';
+        }
+
+        function renderContacts(contacts) {
+            const listElement = document.getElementById('contacts-list');
+            listElement.innerHTML = '';
+
+            if (contacts.length === 0) {
+                document.getElementById('contacts-empty').style.display = 'flex';
+                return;
+            }
+
+            document.getElementById('contacts-empty').style.display = 'none';
+
+            contacts.forEach(contact => {
+                const li = document.createElement('li');
+                li.className = 'group-item';
+                
+                const initials = contact.name.substring(0, 2).toUpperCase() || 'CN';
+                const cleanPhone = contact.id.split('@')[0];
+                const badge = contact.isMyContact 
+                    ? `<span style="font-size: 0.7rem; color: #128c7e; background: rgba(18, 140, 126, 0.15); padding: 0.1rem 0.4rem; border-radius: 4px; margin-left: 0.5rem; font-weight: 500;">Saved</span>` 
+                    : '';
+
+                li.innerHTML = `
+                    <div class="group-info">
+                        <div class="group-avatar" style="background: linear-gradient(135deg, var(--primary) 0%, #075e54 100%);">${initials}</div>
+                        <div class="group-details">
+                            <span class="group-name" style="display: flex; align-items: center;">${escapeHtml(contact.name)}${badge}</span>
+                            <span class="group-id">${cleanPhone}</span>
+                        </div>
+                    </div>
+                    <span class="group-action">Select</span>
+                `;
+                
+                li.addEventListener('click', () => selectContact(contact.id, contact.name));
+                listElement.appendChild(li);
+            });
+        }
+
+        function filterContacts() {
+            const query = document.getElementById('contact-modal-search').value.toLowerCase().trim();
+            const filtered = cachedContacts.filter(c => 
+                c.name.toLowerCase().includes(query) || 
+                c.id.toLowerCase().includes(query)
+            );
+            renderContacts(filtered);
+        }
+
+        function selectContact(contactId, contactName) {
+            let textarea;
+            if (activeContactTarget === 'paste') {
+                textarea = document.getElementById('contacts-input');
+            } else if (activeContactTarget === 'schedule') {
+                textarea = document.getElementById('schedule-contacts');
+            }
+
+            if (textarea) {
+                const currentValue = textarea.value.trim();
+                const newEntry = `${contactId}|${contactName}`;
+                
+                if (currentValue === '') {
+                    textarea.value = newEntry;
+                } else {
+                    textarea.value = currentValue + '\n' + newEntry;
+                }
+                
+                textarea.dispatchEvent(new Event('input'));
+            }
+            
+            closeContactModal();
+        }
+
         // Close modal when clicking outside of modal content
         window.addEventListener('click', (event) => {
-            const modal = document.getElementById('group-modal');
-            if (event.target === modal) {
+            const groupModal = document.getElementById('group-modal');
+            const contactModal = document.getElementById('contact-modal');
+            if (event.target === groupModal) {
                 closeGroupModal();
+            }
+            if (event.target === contactModal) {
+                closeContactModal();
             }
         });
     </script>
@@ -1087,6 +1210,37 @@
                 </div>
                 <ul id="groups-list" class="groups-list">
                     <!-- Dynamic group items will be appended here -->
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- Contact Selector Modal -->
+    <div id="contact-modal" class="modal-overlay">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-user-plus"></i> Select WhatsApp Contact</h3>
+                <button class="modal-close" onclick="closeContactModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="modal-search-wrapper">
+                    <i class="fas fa-search search-icon"></i>
+                    <input type="text" id="contact-modal-search" placeholder="Search contacts..." oninput="filterContacts()">
+                </div>
+                <div id="contacts-loading" class="groups-loading-state">
+                    <div class="spinner"></div>
+                    <p>Loading WhatsApp contacts...</p>
+                </div>
+                <div id="contacts-error" class="groups-error-state" style="display: none;">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <p id="contacts-error-msg">Failed to load contacts.</p>
+                </div>
+                <div id="contacts-empty" class="groups-empty-state" style="display: none;">
+                    <i class="fas fa-folder-open"></i>
+                    <p>No contacts found. Make sure WhatsApp is connected and synced.</p>
+                </div>
+                <ul id="contacts-list" class="groups-list">
+                    <!-- Dynamic contact items will be appended here -->
                 </ul>
             </div>
         </div>

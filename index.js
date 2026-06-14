@@ -980,6 +980,71 @@ app.get('/api/groups', async (req, res) => {
     }
 });
 
+// API route: fetch all WhatsApp contacts for the picker (optimized)
+app.get('/api/contacts', async (req, res) => {
+    if (!whatsappClientReady) {
+        return res.status(503).json({ error: 'WhatsApp client is not connected. Please scan the QR code first.' });
+    }
+    try {
+        const contacts = await client.pupPage.evaluate(() => {
+            try {
+                const collections = window.require('WAWebCollections');
+                if (!collections || !collections.Contact) return [];
+                
+                const ContactMethods = window.require('WAWebContactGetters');
+                let getIsMyContact = null;
+                try {
+                    getIsMyContact = window.require('WAWebFrontendContactGetters').getIsMyContact;
+                } catch (e) {}
+
+                const contactsArray = collections.Contact.getModelsArray();
+                return contactsArray
+                    .filter(c => {
+                        // Filter: only user chats, not groups, not broadcast lists, and not "me"
+                        const isUser = ContactMethods ? ContactMethods.getIsUser(c) : (c.isUser || (c.id && c.id._serialized && c.id._serialized.endsWith('@c.us')));
+                        const isMe = ContactMethods ? ContactMethods.getIsMe(c) : c.isMe;
+                        return isUser && !isMe;
+                    })
+                    .map(c => {
+                        let name = '';
+                        if (ContactMethods) {
+                            name = ContactMethods.getName(c) || ContactMethods.getPushname(c) || c.formattedName || c.name || '';
+                        } else {
+                            name = c.name || c.pushname || c.formattedName || '';
+                        }
+                        
+                        let isMyContact = false;
+                        if (getIsMyContact) {
+                            isMyContact = getIsMyContact(c);
+                        } else if (c.isMyContact !== undefined) {
+                            isMyContact = c.isMyContact;
+                        }
+
+                        return {
+                            id: c.id._serialized,
+                            name: name || 'Unnamed Contact',
+                            isMyContact: !!isMyContact
+                        };
+                    });
+            } catch (err) {
+                return [];
+            }
+        });
+
+        // Sort contacts: saved contacts first, then alphabetically by name
+        contacts.sort((a, b) => {
+            if (a.isMyContact && !b.isMyContact) return -1;
+            if (!a.isMyContact && b.isMyContact) return 1;
+            return a.name.localeCompare(b.name);
+        });
+
+        res.json({ contacts });
+    } catch (err) {
+        console.error('Error fetching contacts:', err.message);
+        res.status(500).json({ error: 'Failed to fetch contacts: ' + err.message });
+    }
+});
+
 // Function to run the automation loop
 async function runAutomation(contacts, messageBody = null, minDelay = 6, maxDelay = 12, isScheduled = false) {
     if (!whatsappClientReady) {
@@ -1026,7 +1091,7 @@ async function runAutomation(contacts, messageBody = null, minDelay = 6, maxDela
         if (rawPhone.endsWith('@g.us')) {
             whatsappId = rawPhone;
             logPhone = `Group: ${name}`;
-        } else if (rawPhone.endsWith('@c.us')) {
+        } else if (rawPhone.endsWith('@c.us') || rawPhone.endsWith('@lid')) {
             whatsappId = rawPhone;
             logPhone = rawPhone.split('@')[0];
         } else {
@@ -1040,7 +1105,7 @@ async function runAutomation(contacts, messageBody = null, minDelay = 6, maxDela
 
         try {
             let canSend = true;
-            if (!whatsappId.endsWith('@g.us')) {
+            if (!whatsappId.endsWith('@g.us') && !whatsappId.endsWith('@lid')) {
                 const isRegistered = await client.isRegisteredUser(whatsappId);
                 if (!isRegistered) {
                     canSend = false;
