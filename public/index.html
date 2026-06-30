@@ -250,10 +250,24 @@
                         </div>
 
                         <button class="btn btn-primary btn-block" id="btn-download-report">
-                            <i class="fas fa-download"></i> Download Excel Report
+                            <i class="fas fa-download"></i> Download Monthly Report
                         </button>
 
-                        <button class="btn btn-secondary btn-block" id="btn-clear-reports" style="margin-top: 1rem; background: rgba(239, 68, 68, 0.1); color: var(--danger); border: 1px solid rgba(239, 68, 68, 0.2);">
+                        <div class="report-divider"></div>
+
+                        <h3 style="font-family: var(--font-heading); margin-bottom: 0.5rem; font-size: 1rem; margin-top: 1.5rem;"><i class="fas fa-calendar-day" style="color: #10b981; margin-right: 0.5rem;"></i>Export Daily Report</h3>
+                        <p class="field-desc">Download a focused Excel spreadsheet showing all replies for a specific day in a clean chronological table.</p>
+
+                        <div class="form-group" style="margin-bottom: 1.5rem;">
+                            <label for="report-day">Select Date</label>
+                            <input type="date" id="report-day" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 8px; padding: 0.65rem; color: var(--text-primary); font-family: inherit; width: 100%; outline: none; box-sizing: border-box;">
+                        </div>
+
+                        <button class="btn btn-primary btn-block" id="btn-download-daily-report" style="margin-bottom: 1.5rem;">
+                            <i class="fas fa-download"></i> Download Daily Report
+                        </button>
+
+                        <button class="btn btn-secondary btn-block" id="btn-clear-reports" style="background: rgba(239, 68, 68, 0.1); color: var(--danger); border: 1px solid rgba(239, 68, 68, 0.2);">
                             <i class="fas fa-trash-alt"></i> Clear Reports History
                         </button>
 
@@ -752,8 +766,15 @@
         const recentRepliesContainer = document.getElementById('recent-replies');
         const replyMonthSelect = document.getElementById('report-month');
         const btnDownloadReport = document.getElementById('btn-download-report');
+        const btnDownloadDailyReport = document.getElementById('btn-download-daily-report');
+        const reportDayInput = document.getElementById('report-day');
         const btnClearReports = document.getElementById('btn-clear-reports');
         let recentRepliesList = [];
+
+        // Set default day value to today in YYYY-MM-DD
+        if (reportDayInput) {
+            reportDayInput.value = new Date().toLocaleDateString('sv');
+        }
 
         async function loadReplyStats() {
             try {
@@ -792,7 +813,18 @@
             const month = replyMonthSelect.value;
             const url = month ? `/download-report?month=${month}` : '/download-report';
             window.open(url, '_blank');
-            addLog('📊 Excel report download started.', 'success');
+            addLog('📊 Excel monthly report download started.', 'success');
+        });
+
+        btnDownloadDailyReport.addEventListener('click', () => {
+            const date = reportDayInput.value;
+            if (!date) {
+                alert('Please select a date.');
+                return;
+            }
+            const url = `/download-daily-report?date=${date}`;
+            window.open(url, '_blank');
+            addLog(`📊 Excel daily report download started for ${date}.`, 'success');
         });
 
         btnClearReports.addEventListener('click', async () => {

@@ -652,8 +652,21 @@ function initializeWhatsAppClient() {
 
         debugLog(eventSource, `Received from ${isGroup ? 'group ' + resolvedFrom + ' (author: ' + displayName + ')' : displayName}: "${msg.body}"`);
 
+        let messageText = msg.body ? msg.body.trim() : '';
+        if (msg.hasMedia) {
+            const typeStr = (msg.type || 'image').toLowerCase();
+            let label = 'Media';
+            if (typeStr === 'image') label = 'Image';
+            else if (typeStr === 'video') label = 'Video';
+            else if (typeStr === 'sticker') label = 'Sticker';
+            else if (typeStr === 'document') label = 'Document';
+            else if (typeStr === 'audio' || typeStr === 'ptt') label = 'Audio';
+
+            messageText = messageText ? `[${label}] ${messageText}` : `[${label}]`;
+        }
+
         // --- Log every incoming reply for the Excel report ---
-        logReply(phone, displayName, isGroup ? `[Group Chat] ${msg.body.trim()}` : msg.body.trim());
+        logReply(phone, displayName, isGroup ? `[Group Chat] ${messageText}` : messageText);
         debugLog(eventSource, `Reply logged. repliesData keys: ${JSON.stringify(Object.keys(repliesData))}`);
 
         // Check if chatbot is enabled
@@ -1068,6 +1081,165 @@ app.get('/download-report', async (req, res) => {
         console.log(`Excel report downloaded: ${filename}`);
     } catch (err) {
         console.error('Error generating Excel report:', err.message);
+        res.status(500).json({ error: 'Failed to generate report: ' + err.message });
+    }
+});
+
+// ============================================================
+//  Express route: Download daily Excel report
+// ============================================================
+app.get('/download-daily-report', async (req, res) => {
+    try {
+        const requestedDate = req.query.date; // format "YYYY-MM-DD"
+        if (!requestedDate) {
+            return res.status(400).json({ error: 'Date query parameter is required (format: YYYY-MM-DD).' });
+        }
+
+        const [yearStr, monStr, dayStr] = requestedDate.split('-');
+        if (!yearStr || !monStr || !dayStr) {
+            return res.status(400).json({ error: 'Invalid date format. Expected YYYY-MM-DD.' });
+        }
+
+        const monthKey = `${yearStr}-${monStr}`;
+        const dayKey = dayStr;
+
+        const monthData = repliesData[monthKey] || {};
+        const dayEntries = monthData[dayKey] || [];
+
+        // Sort chronologically by time ascending
+        dayEntries.sort((a, b) => a.time.localeCompare(b.time));
+
+        // Build Excel Workbook
+        const workbook = new ExcelJS.Workbook();
+        workbook.creator = 'WhatsApp Automator';
+
+        const displayDate = `${dayStr}/${monStr}/${yearStr}`;
+        const worksheet = workbook.addWorksheet(`Daily Log ${dayStr}-${monStr}`);
+        worksheet.views = [{ showGridLines: true }];
+
+        // Title Block
+        worksheet.mergeCells(1, 1, 1, 4);
+        const titleCell = worksheet.getCell(1, 1);
+        titleCell.value = `WhatsApp Automator - Daily Replies Report`;
+        titleCell.font = { name: 'Segoe UI', size: 16, bold: true, color: { argb: 'FF128C7E' } };
+        titleCell.alignment = { vertical: 'middle', horizontal: 'left' };
+        worksheet.getRow(1).height = 30;
+
+        // Subtitle Block
+        worksheet.mergeCells(2, 1, 2, 4);
+        const subtitleCell = worksheet.getCell(2, 1);
+        subtitleCell.value = `Date: ${displayDate} | Total Replies: ${dayEntries.length}`;
+        subtitleCell.font = { name: 'Segoe UI', size: 10, italic: true, color: { argb: 'FF6B7280' } };
+        subtitleCell.alignment = { vertical: 'middle', horizontal: 'left' };
+        worksheet.getRow(2).height = 20;
+
+        // Blank spacer
+        worksheet.addRow([]);
+
+        // Header row
+        const headerRow = ['Time', 'Contact Name', 'Phone Number', 'Message'];
+        worksheet.addRow(headerRow);
+
+        const hRow = worksheet.getRow(4);
+        hRow.font = { name: 'Segoe UI', bold: true, color: { argb: 'FFFFFFFF' }, size: 11 };
+        hRow.alignment = { horizontal: 'left', vertical: 'middle' };
+        hRow.height = 28;
+        hRow.eachCell((cell) => {
+            cell.fill = {
+                type: 'pattern', pattern: 'solid',
+                fgColor: { argb: 'FF128C7E' }  // WhatsApp teal
+            };
+            cell.border = {
+                top: { style: 'thin', color: { argb: 'FF075E54' } },
+                bottom: { style: 'medium', color: { argb: 'FF075E54' } },
+                left: { style: 'thin', color: { argb: 'FF075E54' } },
+                right: { style: 'thin', color: { argb: 'FF075E54' } }
+            };
+        });
+        hRow.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
+        hRow.getCell(3).alignment = { horizontal: 'center', vertical: 'middle' };
+
+        // Column widths - fixed so it won't be too wide or thin
+        worksheet.getColumn(1).width = 12; // Time
+        worksheet.getColumn(2).width = 25; // Contact Name
+        worksheet.getColumn(3).width = 20; // Phone Number
+        worksheet.getColumn(4).width = 65; // Message (Fixed width!)
+
+        const borderStyle = {
+            top: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+            bottom: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+            left: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+            right: { style: 'thin', color: { argb: 'FFE5E7EB' } }
+        };
+
+        if (dayEntries.length === 0) {
+            worksheet.mergeCells(5, 1, 5, 4);
+            const emptyCell = worksheet.getCell(5, 1);
+            emptyCell.value = 'No replies recorded for this day.';
+            emptyCell.font = { name: 'Segoe UI', italic: true, color: { argb: 'FF9CA3AF' } };
+            emptyCell.alignment = { horizontal: 'center', vertical: 'middle' };
+            worksheet.getRow(5).height = 24;
+            
+            // Add thin border to empty cell row
+            for (let c = 1; c <= 4; c++) {
+                worksheet.getCell(5, c).border = borderStyle;
+            }
+        } else {
+            dayEntries.forEach((entry, idx) => {
+                let rawPhone = entry.phone || '';
+                let rawName = entry.name || '';
+                let cleanPhone = '';
+                let cleanName = '';
+
+                if (rawName) {
+                    cleanName = rawName;
+                    cleanPhone = rawPhone.replace(/[^0-9]/g, '');
+                } else {
+                    const hasLetters = /[a-zA-Zא-ת]/.test(rawPhone);
+                    if (hasLetters || !rawPhone.replace(/[^0-9]/g, '')) {
+                        cleanName = rawPhone;
+                        cleanPhone = '';
+                    } else {
+                        cleanName = '';
+                        cleanPhone = rawPhone.replace(/[^0-9]/g, '');
+                    }
+                }
+
+                const rowData = [
+                    entry.time,
+                    cleanName || 'Unnamed Contact',
+                    cleanPhone ? '+' + cleanPhone : '',
+                    entry.message
+                ];
+
+                const row = worksheet.addRow(rowData);
+                row.alignment = { vertical: 'top', wrapText: true };
+                row.getCell(1).alignment = { horizontal: 'center', vertical: 'top' };
+                row.getCell(3).alignment = { horizontal: 'center', vertical: 'top' };
+
+                const zebraColor = idx % 2 === 0 ? 'FFF9FAFB' : 'FFFFFFFF';
+                row.eachCell((cell) => {
+                    cell.fill = {
+                        type: 'pattern', pattern: 'solid',
+                        fgColor: { argb: zebraColor }
+                    };
+                    cell.border = borderStyle;
+                    cell.font = { name: 'Segoe UI', size: 10 };
+                });
+            });
+        }
+
+        // Set response headers for download
+        const filename = `WhatsApp_Daily_Replies_${requestedDate.replace(/-/g, '_')}.xlsx`;
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+
+        await workbook.xlsx.write(res);
+        res.end();
+
+        console.log(`Excel daily report downloaded: ${filename}`);
+    } catch (err) {
+        console.error('Error generating Excel daily report:', err.message);
         res.status(500).json({ error: 'Failed to generate report: ' + err.message });
     }
 });
