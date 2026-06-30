@@ -344,7 +344,7 @@ function isTargeted(jid) {
 }
 
 // Helper: log every incoming reply to repliesData and persist
-function logReply(phone, messageText) {
+function logReply(phone, name, messageText) {
     const now = new Date();
     const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     const dayKey = String(now.getDate()).padStart(2, '0');
@@ -355,6 +355,7 @@ function logReply(phone, messageText) {
 
     repliesData[monthKey][dayKey].push({
         phone,
+        name,
         message: messageText,
         time: timeStr
     });
@@ -367,7 +368,7 @@ function logReply(phone, messageText) {
     }
 
     // Notify dashboard in real-time
-    io.emit('new_reply', { phone, message: messageText, time: timeStr, day: dayKey, month: monthKey });
+    io.emit('new_reply', { phone, name, message: messageText, time: timeStr, day: dayKey, month: monthKey });
 }
 
 // ============================================================
@@ -652,7 +653,7 @@ function initializeWhatsAppClient() {
         debugLog(eventSource, `Received from ${isGroup ? 'group ' + resolvedFrom + ' (author: ' + displayName + ')' : displayName}: "${msg.body}"`);
 
         // --- Log every incoming reply for the Excel report ---
-        logReply(displayName, isGroup ? `[Group Chat] ${msg.body.trim()}` : msg.body.trim());
+        logReply(phone, displayName, isGroup ? `[Group Chat] ${msg.body.trim()}` : msg.body.trim());
         debugLog(eventSource, `Reply logged. repliesData keys: ${JSON.stringify(Object.keys(repliesData))}`);
 
         // Check if chatbot is enabled
@@ -728,14 +729,62 @@ app.get('/download-report', async (req, res) => {
 
         const monthData = repliesData[monthKey] || {};
 
-        // Collect unique phone numbers for this month
-        const phoneSet = new Set();
+        // Parse and consolidate contacts from all entries in the month
+        // An entry looks like: { phone: string, name?: string, message: string, time: string }
+        // We will build a contact Map keyed by phone number (if valid) or by the display name.
+        const contactsMap = new Map(); // key -> { name, phone, days: { [day]: [ { time, message } ] } }
+
         for (const dayKey in monthData) {
             for (const entry of monthData[dayKey]) {
-                phoneSet.add(entry.phone);
+                let rawPhone = entry.phone || '';
+                let rawName = entry.name || '';
+
+                let cleanPhone = '';
+                let cleanName = '';
+
+                if (rawName) {
+                    cleanName = rawName;
+                    cleanPhone = rawPhone.replace(/[^0-9]/g, '');
+                } else {
+                    // Old format backward-compatibility: check if phone field contains characters
+                    const hasLetters = /[a-zA-Zא-ת]/.test(rawPhone);
+                    if (hasLetters || !rawPhone.replace(/[^0-9]/g, '')) {
+                        cleanName = rawPhone;
+                        cleanPhone = '';
+                    } else {
+                        cleanName = '';
+                        cleanPhone = rawPhone.replace(/[^0-9]/g, '');
+                    }
+                }
+
+                // Prefer phone, fallback to name
+                const key = cleanPhone || cleanName || 'Unknown';
+
+                if (!contactsMap.has(key)) {
+                    contactsMap.set(key, {
+                        name: cleanName,
+                        phone: cleanPhone,
+                        days: {}
+                    });
+                }
+
+                const contactRecord = contactsMap.get(key);
+                if (!contactRecord.days[dayKey]) {
+                    contactRecord.days[dayKey] = [];
+                }
+                contactRecord.days[dayKey].push({
+                    time: entry.time,
+                    message: entry.message
+                });
             }
         }
-        const phones = Array.from(phoneSet).sort();
+
+        // Sort contacts alphabetically by Name (or phone if name is missing)
+        const sortedContacts = Array.from(contactsMap.values()).sort((a, b) => {
+            const nameA = a.name || a.phone || '';
+            const nameB = b.name || b.phone || '';
+            return nameA.localeCompare(nameB, 'he', { sensitivity: 'base' });
+        });
 
         // Build the Excel workbook
         const workbook = new ExcelJS.Workbook();
@@ -744,18 +793,43 @@ app.get('/download-report', async (req, res) => {
         const monthNames = ['January','February','March','April','May','June',
                             'July','August','September','October','November','December'];
         const sheetName = `${monthNames[month - 1]} ${year}`;
-        const worksheet = workbook.addWorksheet(sheetName);
+        
+        // ============================================================
+        //  SHEET 1: Replies Calendar Grid
+        // ============================================================
+        const worksheet = workbook.addWorksheet('Replies Grid');
+        worksheet.views = [{ showGridLines: true }];
 
-        // ---- Header row: Day 1 .. Day N ----
-        const headerRow = ['Phone Number'];
+        // Title Block
+        worksheet.mergeCells(1, 1, 1, daysInMonth + 2);
+        const titleCell = worksheet.getCell(1, 1);
+        titleCell.value = `WhatsApp Automator - Monthly Replies Report`;
+        titleCell.font = { name: 'Segoe UI', size: 16, bold: true, color: { argb: 'FF128C7E' } };
+        titleCell.alignment = { vertical: 'middle', horizontal: 'left' };
+        worksheet.getRow(1).height = 30;
+
+        // Subtitle Block
+        worksheet.mergeCells(2, 1, 2, daysInMonth + 2);
+        const subtitleCell = worksheet.getCell(2, 1);
+        const reportGenTime = now.toLocaleString('he-IL', { dateStyle: 'short', timeStyle: 'short' });
+        subtitleCell.value = `Month: ${sheetName} | Generated on: ${reportGenTime}`;
+        subtitleCell.font = { name: 'Segoe UI', size: 10, italic: true, color: { argb: 'FF6B7280' } };
+        subtitleCell.alignment = { vertical: 'middle', horizontal: 'left' };
+        worksheet.getRow(2).height = 20;
+
+        // Blank spacer
+        worksheet.addRow([]);
+
+        // Header row
+        const headerRow = ['Contact Name', 'Phone Number'];
         for (let d = 1; d <= daysInMonth; d++) {
             headerRow.push(`${d}/${month}`);
         }
         worksheet.addRow(headerRow);
 
-        // Style the header row
-        const hRow = worksheet.getRow(1);
-        hRow.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11 };
+        // Style the header row (Row 4)
+        const hRow = worksheet.getRow(4);
+        hRow.font = { name: 'Segoe UI', bold: true, color: { argb: 'FFFFFFFF' }, size: 11 };
         hRow.alignment = { horizontal: 'center', vertical: 'middle' };
         hRow.height = 28;
         hRow.eachCell((cell, colNumber) => {
@@ -764,26 +838,40 @@ app.get('/download-report', async (req, res) => {
                 fgColor: { argb: 'FF128C7E' }  // WhatsApp teal
             };
             cell.border = {
-                top: { style: 'thin' }, bottom: { style: 'thin' },
-                left: { style: 'thin' }, right: { style: 'thin' }
+                top: { style: 'thin', color: { argb: 'FF075E54' } },
+                bottom: { style: 'medium', color: { argb: 'FF075E54' } },
+                left: { style: 'thin', color: { argb: 'FF075E54' } },
+                right: { style: 'thin', color: { argb: 'FF075E54' } }
             };
         });
+        hRow.getCell(1).alignment = { horizontal: 'left', vertical: 'middle' };
+        hRow.getCell(2).alignment = { horizontal: 'left', vertical: 'middle' };
 
         // Set column widths
-        worksheet.getColumn(1).width = 20;
+        worksheet.getColumn(1).width = 24; // Contact Name
+        worksheet.getColumn(2).width = 20; // Phone Number
         for (let d = 1; d <= daysInMonth; d++) {
-            worksheet.getColumn(d + 1).width = 18;
+            worksheet.getColumn(d + 2).width = 16; // Day columns
         }
 
-        // ---- Data rows: one per phone ----
-        phones.forEach((phone, idx) => {
-            const rowData = ['+' + phone];
+        const borderStyle = {
+            top: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+            bottom: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+            left: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+            right: { style: 'thin', color: { argb: 'FFE5E7EB' } }
+        };
+
+        // Data rows: one per contact
+        sortedContacts.forEach((contact, idx) => {
+            const rowData = [
+                contact.name || 'Unnamed Contact',
+                contact.phone ? '+' + contact.phone : ''
+            ];
             for (let d = 1; d <= daysInMonth; d++) {
                 const dayKey = String(d).padStart(2, '0');
-                const dayEntries = (monthData[dayKey] || []).filter(e => e.phone === phone);
+                const dayEntries = contact.days[dayKey] || [];
 
                 if (dayEntries.length > 0) {
-                    // Show replies with time stamps
                     const text = dayEntries.map(e => `[${e.time}] ${e.message}`).join('\n');
                     rowData.push(text);
                 } else {
@@ -794,52 +882,179 @@ app.get('/download-report', async (req, res) => {
             const row = worksheet.addRow(rowData);
             row.alignment = { vertical: 'top', wrapText: true };
 
-            // Alternate row background color
-            const bgColor = idx % 2 === 0 ? 'FFF0FFF0' : 'FFFFFFFF';
-            row.eachCell((cell) => {
-                cell.fill = {
-                    type: 'pattern', pattern: 'solid',
-                    fgColor: { argb: bgColor }
-                };
-                cell.border = {
-                    top: { style: 'thin', color: { argb: 'FFD0D0D0' } },
-                    bottom: { style: 'thin', color: { argb: 'FFD0D0D0' } },
-                    left: { style: 'thin', color: { argb: 'FFD0D0D0' } },
-                    right: { style: 'thin', color: { argb: 'FFD0D0D0' } }
-                };
-            });
+            // Alternate row background colors (zebra striping) for first 2 cells
+            const zebraColor = idx % 2 === 0 ? 'FFF9FAFB' : 'FFFFFFFF';
+            row.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: zebraColor } };
+            row.getCell(2).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: zebraColor } };
 
-            // Bold the phone number cell
-            row.getCell(1).font = { bold: true };
+            // Bold the Name and Phone cells
+            row.getCell(1).font = { name: 'Segoe UI', bold: true, color: { argb: 'FF374151' }, size: 10 };
+            row.getCell(2).font = { name: 'Segoe UI', color: { argb: 'FF6B7280' }, size: 10 };
 
-            // Color cells that have replies
+            row.getCell(1).border = borderStyle;
+            row.getCell(2).border = borderStyle;
+
+            // Style day cells
             for (let d = 1; d <= daysInMonth; d++) {
-                const cell = row.getCell(d + 1);
+                const colIndex = d + 2;
+                const cell = row.getCell(colIndex);
+                cell.border = borderStyle;
+                cell.font = { name: 'Segoe UI', size: 9 };
                 if (cell.value) {
                     cell.fill = {
                         type: 'pattern', pattern: 'solid',
                         fgColor: { argb: 'FFDCFCE7' }  // Light green
                     };
+                    cell.font = { name: 'Segoe UI', size: 9, color: { argb: 'FF14532D' } }; // Dark green text
                 }
             }
         });
 
         // Summary row
-        worksheet.addRow([]);
-        const summaryData = ['Total Replies'];
+        worksheet.addRow([]); // spacer
+        const summaryData = ['Total Replies', ''];
         for (let d = 1; d <= daysInMonth; d++) {
             const dayKey = String(d).padStart(2, '0');
             const count = (monthData[dayKey] || []).length;
             summaryData.push(count > 0 ? count : '');
         }
         const summaryRow = worksheet.addRow(summaryData);
-        summaryRow.font = { bold: true, color: { argb: 'FF128C7E' } };
+        summaryRow.height = 22;
+        summaryRow.font = { name: 'Segoe UI', bold: true, color: { argb: 'FF128C7E' }, size: 10 };
         summaryRow.eachCell((cell) => {
-            cell.alignment = { horizontal: 'center' };
+            cell.alignment = { horizontal: 'center', vertical: 'middle' };
             cell.fill = {
                 type: 'pattern', pattern: 'solid',
                 fgColor: { argb: 'FFE8F5E9' }
             };
+            cell.border = {
+                top: { style: 'medium', color: { argb: 'FF128C7E' } },
+                bottom: { style: 'medium', color: { argb: 'FF128C7E' } },
+                left: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+                right: { style: 'thin', color: { argb: 'FFE5E7EB' } }
+            };
+        });
+        summaryRow.getCell(1).alignment = { horizontal: 'left', vertical: 'middle' };
+        summaryRow.getCell(2).alignment = { horizontal: 'left', vertical: 'middle' };
+
+        // ============================================================
+        //  SHEET 2: Detailed Messages Log
+        // ============================================================
+        const worksheet2 = workbook.addWorksheet('Detailed Log');
+        worksheet2.views = [{ showGridLines: true }];
+
+        // Title Block for Sheet 2
+        worksheet2.mergeCells(1, 1, 1, 4);
+        const titleCell2 = worksheet2.getCell(1, 1);
+        titleCell2.value = `WhatsApp Automator - Detailed Log`;
+        titleCell2.font = { name: 'Segoe UI', size: 16, bold: true, color: { argb: 'FF128C7E' } };
+        titleCell2.alignment = { vertical: 'middle', horizontal: 'left' };
+        worksheet2.getRow(1).height = 30;
+
+        worksheet2.mergeCells(2, 1, 2, 4);
+        const subtitleCell2 = worksheet2.getCell(2, 1);
+        const totalMessagesCount = Object.values(monthData).flat().length;
+        subtitleCell2.value = `Month: ${sheetName} | Total Messages: ${totalMessagesCount}`;
+        subtitleCell2.font = { name: 'Segoe UI', size: 10, italic: true, color: { argb: 'FF6B7280' } };
+        subtitleCell2.alignment = { vertical: 'middle', horizontal: 'left' };
+        worksheet2.getRow(2).height = 20;
+
+        worksheet2.addRow([]); // Blank spacer
+
+        // Header Row for Sheet 2 (Row 4)
+        const headerRow2 = ['Date & Time', 'Contact Name', 'Phone Number', 'Message'];
+        worksheet2.addRow(headerRow2);
+
+        const hRow2 = worksheet2.getRow(4);
+        hRow2.font = { name: 'Segoe UI', bold: true, color: { argb: 'FFFFFFFF' }, size: 11 };
+        hRow2.alignment = { horizontal: 'left', vertical: 'middle' };
+        hRow2.height = 28;
+        hRow2.eachCell((cell) => {
+            cell.fill = {
+                type: 'pattern', pattern: 'solid',
+                fgColor: { argb: 'FF128C7E' }
+            };
+            cell.border = {
+                top: { style: 'thin', color: { argb: 'FF075E54' } },
+                bottom: { style: 'medium', color: { argb: 'FF075E54' } },
+                left: { style: 'thin', color: { argb: 'FF075E54' } },
+                right: { style: 'thin', color: { argb: 'FF075E54' } }
+            };
+        });
+        hRow2.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
+        hRow2.getCell(3).alignment = { horizontal: 'center', vertical: 'middle' };
+
+        worksheet2.getColumn(1).width = 20; // Date & Time
+        worksheet2.getColumn(2).width = 24; // Contact Name
+        worksheet2.getColumn(3).width = 20; // Phone Number
+        worksheet2.getColumn(4).width = 65; // Message
+
+        // Collect all replies in this month chronologically
+        const allReplies = [];
+        for (const dayKey in monthData) {
+            for (const entry of monthData[dayKey]) {
+                allReplies.push({
+                    day: dayKey,
+                    time: entry.time,
+                    phone: entry.phone,
+                    name: entry.name,
+                    message: entry.message
+                });
+            }
+        }
+
+        // Sort chronologically: by dayKey ascending, then by time ascending
+        allReplies.sort((a, b) => {
+            if (a.day !== b.day) {
+                return a.day.localeCompare(b.day);
+            }
+            return a.time.localeCompare(b.time);
+        });
+
+        // Add data rows to Sheet 2
+        allReplies.forEach((reply, idx) => {
+            let rawPhone = reply.phone || '';
+            let rawName = reply.name || '';
+            let cleanPhone = '';
+            let cleanName = '';
+
+            if (rawName) {
+                cleanName = rawName;
+                cleanPhone = rawPhone.replace(/[^0-9]/g, '');
+            } else {
+                const hasLetters = /[a-zA-Zא-ת]/.test(rawPhone);
+                if (hasLetters || !rawPhone.replace(/[^0-9]/g, '')) {
+                    cleanName = rawPhone;
+                    cleanPhone = '';
+                } else {
+                    cleanName = '';
+                    cleanPhone = rawPhone.replace(/[^0-9]/g, '');
+                }
+            }
+
+            const formattedDateTime = `${reply.day}/${monStr}/${year} ${reply.time}`;
+            const rowData = [
+                formattedDateTime,
+                cleanName || 'Unnamed Contact',
+                cleanPhone ? '+' + cleanPhone : '',
+                reply.message
+            ];
+
+            const row = worksheet2.addRow(rowData);
+            row.alignment = { vertical: 'top', wrapText: true };
+            row.getCell(1).alignment = { horizontal: 'center', vertical: 'top' };
+            row.getCell(3).alignment = { horizontal: 'center', vertical: 'top' };
+
+            // Zebra color for the rows
+            const zebraColor = idx % 2 === 0 ? 'FFF9FAFB' : 'FFFFFFFF';
+            row.eachCell((cell) => {
+                cell.fill = {
+                    type: 'pattern', pattern: 'solid',
+                    fgColor: { argb: zebraColor }
+                };
+                cell.border = borderStyle;
+                cell.font = { name: 'Segoe UI', size: 10 };
+            });
         });
 
         // Set response headers for download

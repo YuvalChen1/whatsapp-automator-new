@@ -840,7 +840,8 @@
             renderRecentReplies();
 
             // Also log it
-            addLog(`📩 Reply from +${data.phone}: "${data.message}"`, 'info');
+            const displayLogName = (data.name && data.name !== data.phone) ? `${data.name} (+${data.phone})` : `+${data.phone}`;
+            addLog(`📩 Reply from ${displayLogName}: "${data.message}"`, 'info');
         });
 
         function renderRecentReplies() {
@@ -853,13 +854,17 @@
                 return;
             }
 
-            recentRepliesContainer.innerHTML = recentRepliesList.map(r => `
-                <div class="reply-item">
-                    <div class="reply-phone"><i class="fas fa-user"></i> +${r.phone}</div>
-                    <div class="reply-message">${r.message}</div>
-                    <div class="reply-time">${r.time}</div>
-                </div>
-            `).join('');
+            recentRepliesContainer.innerHTML = recentRepliesList.map(r => {
+                const hasName = r.name && r.name !== r.phone;
+                const headerText = hasName ? `${r.name} <span style="font-size: 0.85em; color: #888; font-weight: normal; margin-left: 4px;">(+${r.phone})</span>` : `+${r.phone}`;
+                return `
+                    <div class="reply-item">
+                        <div class="reply-phone"><i class="fas fa-user"></i> ${headerText}</div>
+                        <div class="reply-message">${r.message}</div>
+                        <div class="reply-time">${r.time}</div>
+                    </div>
+                `;
+            }).join('');
         }
 
         // Group Picker Logic
