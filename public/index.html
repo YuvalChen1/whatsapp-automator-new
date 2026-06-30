@@ -288,17 +288,37 @@
                             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
                                 <div class="form-group" style="margin: 0;">
                                     <label for="gathering-start-time">Start Time (Israel)</label>
-                                    <input type="time" id="gathering-start-time" value="07:00" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 8px; padding: 0.65rem; color: var(--text-primary); font-family: inherit; width: 100%; outline: none; box-sizing: border-box;">
+                                    <input type="time" id="gathering-start-time" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 8px; padding: 0.65rem; color: var(--text-primary); font-family: inherit; width: 100%; outline: none; box-sizing: border-box;">
                                 </div>
                                 <div class="form-group" style="margin: 0;">
                                     <label for="gathering-end-time">End Time (Israel)</label>
-                                    <input type="time" id="gathering-end-time" value="12:00" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 8px; padding: 0.65rem; color: var(--text-primary); font-family: inherit; width: 100%; outline: none; box-sizing: border-box;">
+                                    <input type="time" id="gathering-end-time" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 8px; padding: 0.65rem; color: var(--text-primary); font-family: inherit; width: 100%; outline: none; box-sizing: border-box;">
                                 </div>
                             </div>
                         </div>
 
-                        <button class="btn btn-primary btn-block" id="btn-save-gathering-settings" style="margin-bottom: 0.5rem;">
+                        <button class="btn btn-primary btn-block" id="btn-save-gathering-settings" style="margin-bottom: 1.5rem;">
                             <i class="fas fa-save"></i> Save Gathering Settings
+                        </button>
+
+                        <div class="report-divider"></div>
+
+                        <h3 style="font-family: var(--font-heading); margin-bottom: 0.5rem; font-size: 1rem; margin-top: 1.5rem;"><i class="fas fa-filter" style="color: #10b981; margin-right: 0.5rem;"></i>Report Source Chats</h3>
+                        <p class="field-desc">Only log replies from these specific contacts or groups. Leave empty to gather from all automation targets.</p>
+
+                        <div style="display: flex; gap: 0.75rem; margin-bottom: 1rem;">
+                            <button class="btn btn-secondary" id="btn-report-add-contact" style="flex:1; font-size:0.85rem; padding: 0.6rem 0.75rem;">
+                                <i class="fas fa-user-plus"></i> Add Contact
+                            </button>
+                            <button class="btn btn-secondary" id="btn-report-add-group" style="flex:1; font-size:0.85rem; padding: 0.6rem 0.75rem;">
+                                <i class="fas fa-users"></i> Add Group
+                            </button>
+                        </div>
+
+                        <div id="report-sources-chips" style="display: flex; flex-wrap: wrap; gap: 0.5rem; min-height: 2rem; margin-bottom: 1rem; padding: 0.5rem 0;"></div>
+
+                        <button class="btn btn-primary btn-block" id="btn-save-report-sources">
+                            <i class="fas fa-save"></i> Save Report Sources
                         </button>
 
                         <div class="recent-replies-section" style="margin-top: 1.5rem;">
@@ -806,17 +826,59 @@
         const gatheringEndInput = document.getElementById('gathering-end-time');
         const btnSaveGathering = document.getElementById('btn-save-gathering-settings');
         let recentRepliesList = [];
+        let reportSources = []; // array of { id, name, type }
 
-        // Set default day value to today in YYYY-MM-DD
-        if (reportDayInput) {
-            reportDayInput.value = new Date().toLocaleDateString('sv');
+        // === Israel Timezone Helpers ===
+        function getIsraelTimeParts() {
+            const parts = {};
+            new Intl.DateTimeFormat('en-GB', {
+                timeZone: 'Asia/Jerusalem',
+                year: 'numeric', month: '2-digit', day: '2-digit',
+                hour: '2-digit', minute: '2-digit', hour12: false
+            }).formatToParts(new Date()).forEach(p => { parts[p.type] = p.value; });
+            return parts;
         }
+        function getIsraelTimeStr() {
+            const p = getIsraelTimeParts();
+            return `${p.hour}:${p.minute}`;
+        }
+        function getIsraelDateStr() {
+            const p = getIsraelTimeParts();
+            return `${p.year}-${p.month}-${p.day}`;
+        }
+
+        // Default all time/date inputs to Israel time on load
+        if (reportDayInput)       reportDayInput.value       = getIsraelDateStr();
+        if (gatheringStartInput)  gatheringStartInput.value  = getIsraelTimeStr();
+        if (gatheringEndInput)    gatheringEndInput.value    = getIsraelTimeStr();
 
         // Toggle time fields visibility
         if (gatheringToggle) {
             gatheringToggle.addEventListener('change', () => {
                 gatheringTimeFields.style.display = gatheringToggle.checked ? 'block' : 'none';
             });
+        }
+
+        // === Report Sources chip rendering ===
+        function renderReportSourceChips() {
+            const container = document.getElementById('report-sources-chips');
+            if (!container) return;
+            if (reportSources.length === 0) {
+                container.innerHTML = '<span style="font-size:0.82rem; color: var(--text-secondary); font-style: italic;">No sources selected — gathering from all automation contacts</span>';
+                return;
+            }
+            container.innerHTML = reportSources.map((s, idx) => `
+                <div style="display:inline-flex; align-items:center; gap:0.4rem; background: rgba(18,140,126,0.15); border: 1px solid rgba(18,140,126,0.35); border-radius:20px; padding: 0.3rem 0.75rem; font-size:0.82rem; color: var(--text-primary);">
+                    <i class="fas ${s.type === 'group' ? 'fa-users' : 'fa-user'}" style="color:#10b981; font-size:0.7rem;"></i>
+                    <span>${escapeHtml(s.name)}</span>
+                    <button onclick="removeReportSource(${idx})" style="background:none;border:none;cursor:pointer;color:#ef4444;font-size:0.8rem;padding:0;margin-left:0.2rem;line-height:1;" title="Remove">&times;</button>
+                </div>
+            `).join('');
+        }
+
+        function removeReportSource(idx) {
+            reportSources.splice(idx, 1);
+            renderReportSourceChips();
         }
 
         // Load and apply saved report settings
@@ -828,13 +890,16 @@
                     gatheringToggle.checked = !!data.limitGathering;
                     gatheringTimeFields.style.display = data.limitGathering ? 'block' : 'none';
                 }
-                if (gatheringStartInput) gatheringStartInput.value = data.startTime || '07:00';
-                if (gatheringEndInput) gatheringEndInput.value = data.endTime || '12:00';
+                if (gatheringStartInput) gatheringStartInput.value = data.startTime || getIsraelTimeStr();
+                if (gatheringEndInput)   gatheringEndInput.value   = data.endTime   || getIsraelTimeStr();
+                reportSources = Array.isArray(data.reportSources) ? data.reportSources : [];
+                renderReportSourceChips();
             } catch (err) {
                 console.error('Failed to load report settings:', err);
             }
         }
 
+        // Save gathering window settings
         if (btnSaveGathering) {
             btnSaveGathering.addEventListener('click', async () => {
                 btnSaveGathering.disabled = true;
@@ -842,7 +907,8 @@
                     const payload = {
                         limitGathering: gatheringToggle.checked,
                         startTime: gatheringStartInput.value,
-                        endTime: gatheringEndInput.value
+                        endTime: gatheringEndInput.value,
+                        reportSources
                     };
                     const res = await fetch('/api/report-settings', {
                         method: 'POST',
@@ -863,6 +929,45 @@
                 }
             });
         }
+
+        // Save report sources
+        const btnSaveReportSources = document.getElementById('btn-save-report-sources');
+        if (btnSaveReportSources) {
+            btnSaveReportSources.addEventListener('click', async () => {
+                btnSaveReportSources.disabled = true;
+                try {
+                    const payload = {
+                        limitGathering: gatheringToggle ? gatheringToggle.checked : false,
+                        startTime: gatheringStartInput ? gatheringStartInput.value : '00:00',
+                        endTime: gatheringEndInput ? gatheringEndInput.value : '23:59',
+                        reportSources
+                    };
+                    const res = await fetch('/api/report-settings', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        const count = reportSources.length;
+                        addLog(`✅ Report sources saved: ${count === 0 ? 'All automation contacts' : count + ' source(s) selected'}`, 'success');
+                    } else {
+                        throw new Error(data.error || 'Failed to save');
+                    }
+                } catch (err) {
+                    console.error('Error saving report sources:', err);
+                    alert(`Failed to save: ${err.message}`);
+                } finally {
+                    btnSaveReportSources.disabled = false;
+                }
+            });
+        }
+
+        // Wire up report-source add buttons
+        const btnReportAddContact = document.getElementById('btn-report-add-contact');
+        const btnReportAddGroup   = document.getElementById('btn-report-add-group');
+        if (btnReportAddContact) btnReportAddContact.addEventListener('click', () => openContactModal('report-source'));
+        if (btnReportAddGroup)   btnReportAddGroup.addEventListener('click',   () => openGroupModal('report-source'));
 
         async function loadReplyStats() {
             try {
@@ -1069,6 +1174,16 @@
         }
 
         function selectGroup(groupId, groupName) {
+            if (activeGroupTarget === 'report-source') {
+                const alreadyAdded = reportSources.some(s => s.id === groupId);
+                if (!alreadyAdded) {
+                    reportSources.push({ id: groupId, name: groupName, type: 'group' });
+                    renderReportSourceChips();
+                }
+                closeGroupModal();
+                return;
+            }
+
             let textarea;
             if (activeGroupTarget === 'paste') {
                 textarea = document.getElementById('contacts-input');
@@ -1243,6 +1358,16 @@
         }
 
         function selectContact(contactId, contactName) {
+            if (activeContactTarget === 'report-source') {
+                const alreadyAdded = reportSources.some(s => s.id === contactId);
+                if (!alreadyAdded) {
+                    reportSources.push({ id: contactId, name: contactName, type: 'contact' });
+                    renderReportSourceChips();
+                }
+                closeContactModal();
+                return;
+            }
+
             let textarea;
             if (activeContactTarget === 'paste') {
                 textarea = document.getElementById('contacts-input');
@@ -1268,6 +1393,18 @@
 
         function addSelectedContacts() {
             if (selectedContacts.size === 0) {
+                closeContactModal();
+                return;
+            }
+
+            // report-source mode: add all selected to chips
+            if (activeContactTarget === 'report-source') {
+                selectedContacts.forEach((name, id) => {
+                    if (!reportSources.some(s => s.id === id)) {
+                        reportSources.push({ id, name, type: 'contact' });
+                    }
+                });
+                renderReportSourceChips();
                 closeContactModal();
                 return;
             }
@@ -1326,7 +1463,7 @@
                 document.getElementById('schedule-modal-title').innerHTML = `<i class="fas fa-clock"></i> Create Scheduled Event`;
                 document.getElementById('edit-schedule-id').value = '';
                 document.getElementById('schedule-name').value = '';
-                document.getElementById('schedule-time').value = '07:00';
+                document.getElementById('schedule-time').value = getIsraelTimeStr();
                 document.getElementById('schedule-timezone').value = 'UTC';
                 document.getElementById('schedule-enabled').checked = true;
                 document.getElementById('schedule-message').value = '';

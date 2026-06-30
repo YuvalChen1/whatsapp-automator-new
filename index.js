@@ -267,7 +267,8 @@ if (fs.existsSync(REPLIES_FILE)) {
 let reportSettings = {
     limitGathering: false,
     startTime: '07:00',
-    endTime: '12:00'
+    endTime: '12:00',
+    reportSources: [] // array of { id, name, type } — empty = all targeted contacts
 };
 
 if (fs.existsSync(REPORT_SETTINGS_FILE)) {
@@ -693,6 +694,16 @@ function initializeWhatsAppClient() {
                 }
             } catch (err) {
                 console.error('Failed to validate gathering window:', err.message);
+            }
+        }
+
+        // === REPORT SOURCES FILTER ===
+        if (reportSettings && Array.isArray(reportSettings.reportSources) && reportSettings.reportSources.length > 0) {
+            const sourceIds = reportSettings.reportSources.map(s => s.id);
+            const matchesSource = sourceIds.includes(resolvedFrom) || sourceIds.includes(msg.from) || sourceIds.includes(sender);
+            if (!matchesSource) {
+                debugLog(eventSource, `SKIPPED - ${resolvedFrom} is NOT in report sources list.`);
+                return;
             }
         }
 
@@ -1426,11 +1437,12 @@ app.get('/api/report-settings', (req, res) => {
 // API route: save report settings
 app.post('/api/report-settings', (req, res) => {
     try {
-        const { limitGathering, startTime, endTime } = req.body;
+        const { limitGathering, startTime, endTime, reportSources } = req.body;
         reportSettings = {
             limitGathering: !!limitGathering,
             startTime: startTime || '07:00',
-            endTime: endTime || '12:00'
+            endTime: endTime || '12:00',
+            reportSources: Array.isArray(reportSources) ? reportSources : []
         };
         fs.writeFileSync(REPORT_SETTINGS_FILE, JSON.stringify(reportSettings, null, 2));
         console.log('Report settings saved:', reportSettings);
