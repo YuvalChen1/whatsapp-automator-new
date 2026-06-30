@@ -20,6 +20,7 @@ const SCHEDULE_FILE = path.join(DATA_DIR, 'schedule.json');
 const CHATBOT_FILE = path.join(DATA_DIR, 'chatbot_rules.json');
 const REPLIES_FILE = path.join(DATA_DIR, 'replies.json');
 const TARGETED_CONTACTS_FILE = path.join(DATA_DIR, 'targeted_contacts.json');
+const REPORT_SETTINGS_FILE = path.join(DATA_DIR, 'report_settings.json');
 
 // === NEW: Session isolation strategy ===
 // Persistent disk stores a BACKUP of the session (no Chromium lock files)
@@ -263,6 +264,22 @@ if (fs.existsSync(REPLIES_FILE)) {
     }
 }
 
+let reportSettings = {
+    limitGathering: false,
+    startTime: '07:00',
+    endTime: '12:00'
+};
+
+if (fs.existsSync(REPORT_SETTINGS_FILE)) {
+    try {
+        const raw = fs.readFileSync(REPORT_SETTINGS_FILE, 'utf8');
+        reportSettings = JSON.parse(raw);
+        console.log('Loaded report settings:', reportSettings);
+    } catch (e) {
+        console.error('Error reading report_settings.json:', e.message);
+    }
+}
+
 // === TARGETED CONTACTS TRACKING ===
 let targetedContacts = new Set();
 
@@ -346,9 +363,35 @@ function isTargeted(jid) {
 // Helper: log every incoming reply to repliesData and persist
 function logReply(phone, name, messageText) {
     const now = new Date();
-    const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-    const dayKey = String(now.getDate()).padStart(2, '0');
-    const timeStr = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+    
+    let yearStr, monthStr, dayKey, timeStr;
+    try {
+        const formatter = new Intl.DateTimeFormat('en-GB', {
+            timeZone: 'Asia/Jerusalem',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false
+        });
+        const parts = formatter.formatToParts(now);
+        const dateObj = {};
+        parts.forEach(p => { dateObj[p.type] = p.value; });
+        
+        yearStr = dateObj.year;
+        monthStr = dateObj.month;
+        dayKey = dateObj.day;
+        timeStr = `${dateObj.hour}:${dateObj.minute}`;
+    } catch (err) {
+        console.error('Failed to format date in Israel timezone:', err.message);
+        yearStr = String(now.getUTCFullYear());
+        monthStr = String(now.getUTCMonth() + 1).padStart(2, '0');
+        dayKey = String(now.getUTCDate()).padStart(2, '0');
+        timeStr = now.toLocaleTimeString('en-GB', { timeZone: 'UTC', hour: '2-digit', minute: '2-digit' });
+    }
+    
+    const monthKey = `${yearStr}-${monthStr}`;
 
     if (!repliesData[monthKey]) repliesData[monthKey] = {};
     if (!repliesData[monthKey][dayKey]) repliesData[monthKey][dayKey] = [];
@@ -568,23 +611,8 @@ function initializeWhatsAppClient() {
 
     // === SHARED MESSAGE HANDLER (attached to both 'message' and 'message_create') ===
     async function handleIncomingMessage(msg, eventSource) {
-        // For our OWN outgoing messages: capture the recipient's LID and add to targeted
+        // Ignore our own outgoing messages
         if (msg.fromMe) {
-            if (msg.to) {
-                // Check if this outgoing message goes to someone we're tracking
-                // by seeing if the msg.to (LID) is already targeted or if we just sent via automation
-                const recipientId = msg.to;
-                debugLog(eventSource, `Outgoing msg detected: to=${recipientId}`);
-                // Record the recipient LID as targeted (automation already recorded @c.us,
-                // this adds the @lid variant so incoming replies match directly)
-                if (!targetedContacts.has(recipientId)) {
-                    // Only auto-add if we have at least 1 targeted contact (i.e., automation is active)
-                    if (targetedContacts.size > 0) {
-                        recordTargetedContact(recipientId);
-                        debugLog(eventSource, `Recorded outgoing recipient as targeted: ${recipientId}`);
-                    }
-                }
-            }
             return;
         }
 
@@ -633,6 +661,39 @@ function initializeWhatsAppClient() {
         if (!targeted) {
             debugLog(eventSource, `SKIPPED - ${resolvedFrom} (original: ${msg.from}) is NOT in targeted contacts.`);
             return;
+        }
+
+        // === GATHERING WINDOW CHECK ===
+        if (reportSettings && reportSettings.limitGathering) {
+            try {
+                const formatter = new Intl.DateTimeFormat('en-GB', {
+                    timeZone: 'Asia/Jerusalem',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    hour12: false
+                });
+                const parts = formatter.formatToParts(new Date());
+                const dateObj = {};
+                parts.forEach(p => { dateObj[p.type] = p.value; });
+                const currentStr = `${dateObj.hour}:${dateObj.minute}`;
+
+                const start = reportSettings.startTime || '00:00';
+                const end = reportSettings.endTime || '23:59';
+
+                let isInWindow = false;
+                if (start <= end) {
+                    isInWindow = (currentStr >= start && currentStr <= end);
+                } else {
+                    isInWindow = (currentStr >= start || currentStr <= end);
+                }
+
+                if (!isInWindow) {
+                    debugLog(eventSource, `SKIPPED - Message received at ${currentStr} is outside the active gathering window (${start} - ${end}).`);
+                    return;
+                }
+            } catch (err) {
+                console.error('Failed to validate gathering window:', err.message);
+            }
         }
 
         debugLog(eventSource, `MATCH FOUND - Processing message from ${resolvedFrom} (original: ${msg.from})`);
@@ -1117,8 +1178,8 @@ app.get('/download-daily-report', async (req, res) => {
         const worksheet = workbook.addWorksheet(`Daily Log ${dayStr}-${monStr}`);
         worksheet.views = [{ showGridLines: true }];
 
-        // Title Block
-        worksheet.mergeCells(1, 1, 1, 4);
+        // Title Block - now 3 columns
+        worksheet.mergeCells(1, 1, 1, 3);
         const titleCell = worksheet.getCell(1, 1);
         titleCell.value = `WhatsApp Automator - Daily Replies Report`;
         titleCell.font = { name: 'Segoe UI', size: 16, bold: true, color: { argb: 'FF128C7E' } };
@@ -1126,7 +1187,7 @@ app.get('/download-daily-report', async (req, res) => {
         worksheet.getRow(1).height = 30;
 
         // Subtitle Block
-        worksheet.mergeCells(2, 1, 2, 4);
+        worksheet.mergeCells(2, 1, 2, 3);
         const subtitleCell = worksheet.getCell(2, 1);
         subtitleCell.value = `Date: ${displayDate} | Total Replies: ${dayEntries.length}`;
         subtitleCell.font = { name: 'Segoe UI', size: 10, italic: true, color: { argb: 'FF6B7280' } };
@@ -1136,8 +1197,8 @@ app.get('/download-daily-report', async (req, res) => {
         // Blank spacer
         worksheet.addRow([]);
 
-        // Header row
-        const headerRow = ['Time', 'Contact Name', 'Phone Number', 'Message'];
+        // Header row — 3 columns only: Time | Contact Name | Reply
+        const headerRow = ['Time', 'Contact Name', 'Reply'];
         worksheet.addRow(headerRow);
 
         const hRow = worksheet.getRow(4);
@@ -1157,13 +1218,11 @@ app.get('/download-daily-report', async (req, res) => {
             };
         });
         hRow.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
-        hRow.getCell(3).alignment = { horizontal: 'center', vertical: 'middle' };
 
-        // Column widths - fixed so it won't be too wide or thin
+        // Fixed column widths
         worksheet.getColumn(1).width = 12; // Time
-        worksheet.getColumn(2).width = 25; // Contact Name
-        worksheet.getColumn(3).width = 20; // Phone Number
-        worksheet.getColumn(4).width = 65; // Message (Fixed width!)
+        worksheet.getColumn(2).width = 28; // Contact Name
+        worksheet.getColumn(3).width = 65; // Reply (fixed!)
 
         const borderStyle = {
             top: { style: 'thin', color: { argb: 'FFE5E7EB' } },
@@ -1173,49 +1232,38 @@ app.get('/download-daily-report', async (req, res) => {
         };
 
         if (dayEntries.length === 0) {
-            worksheet.mergeCells(5, 1, 5, 4);
+            worksheet.mergeCells(5, 1, 5, 3);
             const emptyCell = worksheet.getCell(5, 1);
             emptyCell.value = 'No replies recorded for this day.';
             emptyCell.font = { name: 'Segoe UI', italic: true, color: { argb: 'FF9CA3AF' } };
             emptyCell.alignment = { horizontal: 'center', vertical: 'middle' };
             worksheet.getRow(5).height = 24;
-            
-            // Add thin border to empty cell row
-            for (let c = 1; c <= 4; c++) {
+            for (let c = 1; c <= 3; c++) {
                 worksheet.getCell(5, c).border = borderStyle;
             }
         } else {
             dayEntries.forEach((entry, idx) => {
-                let rawPhone = entry.phone || '';
                 let rawName = entry.name || '';
-                let cleanPhone = '';
+                let rawPhone = entry.phone || '';
                 let cleanName = '';
 
                 if (rawName) {
                     cleanName = rawName;
-                    cleanPhone = rawPhone.replace(/[^0-9]/g, '');
                 } else {
+                    // Fallback: old format where phone field may contain the display name
                     const hasLetters = /[a-zA-Zא-ת]/.test(rawPhone);
-                    if (hasLetters || !rawPhone.replace(/[^0-9]/g, '')) {
-                        cleanName = rawPhone;
-                        cleanPhone = '';
-                    } else {
-                        cleanName = '';
-                        cleanPhone = rawPhone.replace(/[^0-9]/g, '');
-                    }
+                    cleanName = (hasLetters || !rawPhone.replace(/[^0-9]/g, '')) ? rawPhone : '';
                 }
 
                 const rowData = [
                     entry.time,
                     cleanName || 'Unnamed Contact',
-                    cleanPhone ? '+' + cleanPhone : '',
                     entry.message
                 ];
 
                 const row = worksheet.addRow(rowData);
                 row.alignment = { vertical: 'top', wrapText: true };
                 row.getCell(1).alignment = { horizontal: 'center', vertical: 'top' };
-                row.getCell(3).alignment = { horizontal: 'center', vertical: 'top' };
 
                 const zebraColor = idx % 2 === 0 ? 'FFF9FAFB' : 'FFFFFFFF';
                 row.eachCell((cell) => {
@@ -1325,13 +1373,30 @@ app.get('/api/reply-months', (req, res) => {
 
 // API route: get reply stats for dashboard
 app.get('/api/reply-stats', (req, res) => {
+    // Use Israel timezone for stats
     const now = new Date();
-    const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    let monthKey, todayKey;
+    try {
+        const formatter = new Intl.DateTimeFormat('en-GB', {
+            timeZone: 'Asia/Jerusalem',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit'
+        });
+        const parts = formatter.formatToParts(now);
+        const dateObj = {};
+        parts.forEach(p => { dateObj[p.type] = p.value; });
+        monthKey = `${dateObj.year}-${dateObj.month}`;
+        todayKey = dateObj.day;
+    } catch (e) {
+        monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+        todayKey = String(now.getDate()).padStart(2, '0');
+    }
+
     const monthData = repliesData[monthKey] || {};
 
     let totalReplies = 0;
     const uniquePhones = new Set();
-    const todayKey = String(now.getDate()).padStart(2, '0');
     let todayReplies = 0;
 
     for (const dayKey in monthData) {
@@ -1351,6 +1416,29 @@ app.get('/api/reply-stats', (req, res) => {
         uniqueContacts: uniquePhones.size,
         todayReplies
     });
+});
+
+// API route: get report settings
+app.get('/api/report-settings', (req, res) => {
+    res.json(reportSettings);
+});
+
+// API route: save report settings
+app.post('/api/report-settings', (req, res) => {
+    try {
+        const { limitGathering, startTime, endTime } = req.body;
+        reportSettings = {
+            limitGathering: !!limitGathering,
+            startTime: startTime || '07:00',
+            endTime: endTime || '12:00'
+        };
+        fs.writeFileSync(REPORT_SETTINGS_FILE, JSON.stringify(reportSettings, null, 2));
+        console.log('Report settings saved:', reportSettings);
+        res.json({ success: true, settings: reportSettings });
+    } catch (err) {
+        console.error('Failed to save report settings:', err.message);
+        res.status(500).json({ error: 'Failed to save settings: ' + err.message });
+    }
 });
 
 // API route: fetch all WhatsApp groups for the picker (optimized)

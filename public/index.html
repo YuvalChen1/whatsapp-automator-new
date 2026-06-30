@@ -271,6 +271,36 @@
                             <i class="fas fa-trash-alt"></i> Clear Reports History
                         </button>
 
+                        <div class="report-divider"></div>
+
+                        <h3 style="font-family: var(--font-heading); margin-bottom: 0.5rem; font-size: 1rem; margin-top: 1.5rem;"><i class="fas fa-clock" style="color: #10b981; margin-right: 0.5rem;"></i>Report Gathering Window</h3>
+                        <p class="field-desc">Limit which hours of the day replies will be logged. Replies outside the window will be ignored by the report.</p>
+
+                        <div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1rem;">
+                            <label class="switch">
+                                <input type="checkbox" id="gathering-limit-toggle">
+                                <span class="slider"></span>
+                            </label>
+                            <span style="font-size: 0.9rem; color: var(--text-secondary);">Enable gathering time limit</span>
+                        </div>
+
+                        <div id="gathering-time-fields" style="display: none;">
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+                                <div class="form-group" style="margin: 0;">
+                                    <label for="gathering-start-time">Start Time (Israel)</label>
+                                    <input type="time" id="gathering-start-time" value="07:00" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 8px; padding: 0.65rem; color: var(--text-primary); font-family: inherit; width: 100%; outline: none; box-sizing: border-box;">
+                                </div>
+                                <div class="form-group" style="margin: 0;">
+                                    <label for="gathering-end-time">End Time (Israel)</label>
+                                    <input type="time" id="gathering-end-time" value="12:00" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 8px; padding: 0.65rem; color: var(--text-primary); font-family: inherit; width: 100%; outline: none; box-sizing: border-box;">
+                                </div>
+                            </div>
+                        </div>
+
+                        <button class="btn btn-primary btn-block" id="btn-save-gathering-settings" style="margin-bottom: 0.5rem;">
+                            <i class="fas fa-save"></i> Save Gathering Settings
+                        </button>
+
                         <div class="recent-replies-section" style="margin-top: 1.5rem;">
                             <h3 style="font-family: var(--font-heading); margin-bottom: 0.75rem; font-size: 1rem;"><i class="fas fa-clock-rotate-left" style="color: #10b981; margin-right: 0.5rem;"></i>Recent Replies</h3>
                             <div class="recent-replies-list" id="recent-replies">
@@ -394,6 +424,7 @@
             if (tab === 'reports') {
                 loadReplyStats();
                 loadAvailableMonths();
+                loadReportSettings();
             }
         }
 
@@ -769,11 +800,68 @@
         const btnDownloadDailyReport = document.getElementById('btn-download-daily-report');
         const reportDayInput = document.getElementById('report-day');
         const btnClearReports = document.getElementById('btn-clear-reports');
+        const gatheringToggle = document.getElementById('gathering-limit-toggle');
+        const gatheringTimeFields = document.getElementById('gathering-time-fields');
+        const gatheringStartInput = document.getElementById('gathering-start-time');
+        const gatheringEndInput = document.getElementById('gathering-end-time');
+        const btnSaveGathering = document.getElementById('btn-save-gathering-settings');
         let recentRepliesList = [];
 
         // Set default day value to today in YYYY-MM-DD
         if (reportDayInput) {
             reportDayInput.value = new Date().toLocaleDateString('sv');
+        }
+
+        // Toggle time fields visibility
+        if (gatheringToggle) {
+            gatheringToggle.addEventListener('change', () => {
+                gatheringTimeFields.style.display = gatheringToggle.checked ? 'block' : 'none';
+            });
+        }
+
+        // Load and apply saved report settings
+        async function loadReportSettings() {
+            try {
+                const res = await fetch('/api/report-settings');
+                const data = await res.json();
+                if (gatheringToggle) {
+                    gatheringToggle.checked = !!data.limitGathering;
+                    gatheringTimeFields.style.display = data.limitGathering ? 'block' : 'none';
+                }
+                if (gatheringStartInput) gatheringStartInput.value = data.startTime || '07:00';
+                if (gatheringEndInput) gatheringEndInput.value = data.endTime || '12:00';
+            } catch (err) {
+                console.error('Failed to load report settings:', err);
+            }
+        }
+
+        if (btnSaveGathering) {
+            btnSaveGathering.addEventListener('click', async () => {
+                btnSaveGathering.disabled = true;
+                try {
+                    const payload = {
+                        limitGathering: gatheringToggle.checked,
+                        startTime: gatheringStartInput.value,
+                        endTime: gatheringEndInput.value
+                    };
+                    const res = await fetch('/api/report-settings', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        addLog(`✅ Gathering window saved: ${payload.limitGathering ? `${payload.startTime} – ${payload.endTime}` : 'Disabled (all day)'}`, 'success');
+                    } else {
+                        throw new Error(data.error || 'Failed to save settings');
+                    }
+                } catch (err) {
+                    console.error('Error saving gathering settings:', err);
+                    alert(`Failed to save: ${err.message}`);
+                } finally {
+                    btnSaveGathering.disabled = false;
+                }
+            });
         }
 
         async function loadReplyStats() {
