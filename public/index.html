@@ -239,23 +239,7 @@
 
                         <div class="report-divider"></div>
 
-                        <h3 style="font-family: var(--font-heading); margin-bottom: 0.5rem; font-size: 1rem;"><i class="fas fa-file-excel" style="color: #10b981; margin-right: 0.5rem;"></i>Export Monthly Report</h3>
-                        <p class="field-desc">Download an Excel spreadsheet showing all replies for a selected month. Columns = days, rows = phone numbers.</p>
-
-                        <div class="form-group" style="margin-bottom: 1.5rem;">
-                            <label for="report-month">Select Month</label>
-                            <select id="report-month" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 8px; padding: 0.65rem; color: var(--text-primary); font-family: inherit; width: 100%; outline: none; cursor: pointer; appearance: none;">
-                                <option value="">Current Month</option>
-                            </select>
-                        </div>
-
-                        <button class="btn btn-primary btn-block" id="btn-download-report">
-                            <i class="fas fa-download"></i> Download Monthly Report
-                        </button>
-
-                        <div class="report-divider"></div>
-
-                        <h3 style="font-family: var(--font-heading); margin-bottom: 0.5rem; font-size: 1rem; margin-top: 1.5rem;"><i class="fas fa-calendar-day" style="color: #10b981; margin-right: 0.5rem;"></i>Export Daily Report</h3>
+                        <h3 style="font-family: var(--font-heading); margin-bottom: 0.5rem; font-size: 1rem;"><i class="fas fa-calendar-day" style="color: #10b981; margin-right: 0.5rem;"></i>Export Daily Report</h3>
                         <p class="field-desc">Download a focused Excel spreadsheet showing all replies for a specific day in a clean chronological table.</p>
 
                         <div class="form-group" style="margin-bottom: 1.5rem;">
@@ -265,6 +249,22 @@
 
                         <button class="btn btn-primary btn-block" id="btn-download-daily-report" style="margin-bottom: 1.5rem;">
                             <i class="fas fa-download"></i> Download Daily Report
+                        </button>
+
+                        <div class="report-divider"></div>
+
+                        <h3 style="font-family: var(--font-heading); margin-bottom: 0.5rem; font-size: 1rem; margin-top: 1.5rem;"><i class="fas fa-file-excel" style="color: #10b981; margin-right: 0.5rem;"></i>Export Monthly Report</h3>
+                        <p class="field-desc">Download an Excel spreadsheet showing all replies for a selected month. Columns = days, rows = phone numbers.</p>
+
+                        <div class="form-group" style="margin-bottom: 1.5rem;">
+                            <label for="report-month">Select Month</label>
+                            <select id="report-month" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 8px; padding: 0.65rem; color: var(--text-primary); font-family: inherit; width: 100%; outline: none; cursor: pointer; appearance: none;">
+                                <option value="">Current Month</option>
+                            </select>
+                        </div>
+
+                        <button class="btn btn-primary btn-block" id="btn-download-report" style="margin-bottom: 1.5rem;">
+                            <i class="fas fa-download"></i> Download Monthly Report
                         </button>
 
                         <button class="btn btn-secondary btn-block" id="btn-clear-reports" style="background: rgba(239, 68, 68, 0.1); color: var(--danger); border: 1px solid rgba(239, 68, 68, 0.2);">

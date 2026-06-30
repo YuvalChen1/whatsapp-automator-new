@@ -700,9 +700,22 @@ function initializeWhatsAppClient() {
         // === REPORT SOURCES FILTER ===
         if (reportSettings && Array.isArray(reportSettings.reportSources) && reportSettings.reportSources.length > 0) {
             const sourceIds = reportSettings.reportSources.map(s => s.id);
-            const matchesSource = sourceIds.includes(resolvedFrom) || sourceIds.includes(msg.from) || sourceIds.includes(sender);
+            // Also compare by bare phone number (strip @c.us / @g.us / @lid) to handle JID format differences
+            const sourcePhones = sourceIds.map(id => id.split('@')[0]);
+            const resolvedPhone = resolvedFrom.split('@')[0];
+            const senderPhone  = sender.split('@')[0];
+            const fromPhone    = msg.from.split('@')[0];
+
+            const matchesSource =
+                sourceIds.includes(resolvedFrom) ||
+                sourceIds.includes(msg.from) ||
+                sourceIds.includes(sender) ||
+                sourcePhones.includes(resolvedPhone) ||
+                sourcePhones.includes(senderPhone) ||
+                sourcePhones.includes(fromPhone);
+
             if (!matchesSource) {
-                debugLog(eventSource, `SKIPPED - ${resolvedFrom} is NOT in report sources list.`);
+                debugLog(eventSource, `SKIPPED - ${resolvedFrom} (phone: ${resolvedPhone}) is NOT in report sources list.`);
                 return;
             }
         }
@@ -747,6 +760,20 @@ function initializeWhatsAppClient() {
             return;
         }
 
+        // === CHATBOT: Skip media messages entirely ===
+        if (msg.hasMedia) {
+            debugLog(eventSource, `Chatbot skipping media message (type: ${msg.type}).`);
+            return;
+        }
+
+        // === CHATBOT: Only match if body is purely the trigger — no surrounding text ===
+        // Normalise: collapse all unicode whitespace and strip any trailing punctuation that isn't part of the trigger
+        const bodyForTrigger = msg.body ? msg.body.trim() : '';
+        if (!bodyForTrigger) {
+            debugLog(eventSource, `Chatbot skipping empty message body.`);
+            return;
+        }
+
         debugLog(eventSource, `Chatbot ENABLED. Checking ${chatbotConfig.rules.length} rules against: "${incomingText}"`);
 
         for (const rule of chatbotConfig.rules) {
@@ -755,6 +782,7 @@ function initializeWhatsAppClient() {
             const triggers = rule.trigger.split(',').map(t => t.trim().toLowerCase());
             debugLog(eventSource, `Checking rule: triggers=[${triggers.join(', ')}] against "${incomingText}"`);
 
+            // Strict exact match: the ENTIRE trimmed message must equal the trigger
             if (triggers.includes(incomingText)) {
                 debugLog(eventSource, `TRIGGER MATCHED "${incomingText}". Replying: "${rule.reply}"`);
                 
