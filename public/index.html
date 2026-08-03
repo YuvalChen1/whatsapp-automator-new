@@ -186,121 +186,149 @@
 
                     <!-- Tab Content: Reports -->
                     <div class="tab-content" id="tab-reports">
-                        <div class="schedule-status-banner active" id="reports-banner">
+                        <!-- Top Banner & Stats Summary Bar -->
+                        <div class="schedule-status-banner active" id="reports-banner" style="margin-bottom: 1rem;">
                             <i class="fas fa-chart-line"></i>
                             <span id="reports-banner-text" data-i18n="reportsBanner">Reply Tracking — All incoming messages are logged automatically</span>
                         </div>
 
-                        <div class="report-stats-grid" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin: 1.5rem 0;">
-                            <div class="report-stat-card">
-                                <i class="fas fa-reply-all"></i>
-                                <span class="report-stat-num" id="stat-month-replies">0</span>
-                                <span class="report-stat-label" data-i18n="thisMonthLabel">This Month</span>
+                        <div class="report-stats-grid" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem; margin-bottom: 1.25rem;">
+                            <div class="report-stat-card" style="padding: 0.75rem 1rem;">
+                                <i class="fas fa-reply-all" style="font-size: 1.2rem;"></i>
+                                <span class="report-stat-num" id="stat-month-replies" style="font-size: 1.3rem;">0</span>
+                                <span class="report-stat-label" data-i18n="thisMonthLabel" style="font-size: 0.75rem;">This Month</span>
                             </div>
-                            <div class="report-stat-card">
-                                <i class="fas fa-calendar-day"></i>
-                                <span class="report-stat-num" id="stat-today-replies">0</span>
-                                <span class="report-stat-label" data-i18n="todayLabel">Today</span>
+                            <div class="report-stat-card" style="padding: 0.75rem 1rem;">
+                                <i class="fas fa-calendar-day" style="font-size: 1.2rem;"></i>
+                                <span class="report-stat-num" id="stat-today-replies" style="font-size: 1.3rem;">0</span>
+                                <span class="report-stat-label" data-i18n="todayLabel" style="font-size: 0.75rem;">Today</span>
                             </div>
-                            <div class="report-stat-card">
-                                <i class="fas fa-users"></i>
-                                <span class="report-stat-num" id="stat-unique-contacts">0</span>
-                                <span class="report-stat-label" data-i18n="uniqueContactsLabel">Unique Contacts</span>
+                            <div class="report-stat-card" style="padding: 0.75rem 1rem;">
+                                <i class="fas fa-users" style="font-size: 1.2rem;"></i>
+                                <span class="report-stat-num" id="stat-unique-contacts" style="font-size: 1.3rem;">0</span>
+                                <span class="report-stat-label" data-i18n="uniqueContactsLabel" style="font-size: 0.75rem;">Unique Contacts</span>
                             </div>
                         </div>
 
-                        <div class="report-divider"></div>
+                        <!-- Main 2-Column Compact Layout Grid -->
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; align-items: start;">
+                            
+                            <!-- Left Column: Downloads & Gathering Window -->
+                            <div style="display: flex; flex-direction: column; gap: 1rem;">
+                                
+                                <!-- Card 1: Export Reports -->
+                                <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-color); border-radius: 12px; padding: 1rem;">
+                                    <h4 style="font-family: var(--font-heading); margin-bottom: 0.75rem; font-size: 0.9rem; display: flex; align-items: center; gap: 0.5rem; color: var(--text-primary);">
+                                        <i class="fas fa-file-excel" style="color: #10b981;"></i>
+                                        <span data-i18n="exportReportsTitle">Export Excel Reports</span>
+                                    </h4>
 
-                        <h3 style="font-family: var(--font-heading); margin-bottom: 0.5rem; font-size: 1rem;"><i class="fas fa-calendar-day" style="color: #10b981; margin-right: 0.5rem;"></i><span data-i18n="exportDailyTitle">Export Daily Report</span></h3>
-                        <p class="field-desc" data-i18n="exportDailyDesc">Download a focused Excel spreadsheet showing all replies for a specific day in a clean chronological table.</p>
+                                    <!-- Daily Export Section -->
+                                    <div style="background: rgba(0,0,0,0.2); border: 1px solid var(--border-color); border-radius: 8px; padding: 0.75rem; margin-bottom: 0.75rem;">
+                                        <label style="font-size: 0.78rem; font-weight: 500; color: var(--text-primary); margin-bottom: 0.35rem; display: block;" data-i18n="exportDailyTitle">Export Daily Report</label>
+                                        <div style="display: flex; gap: 0.5rem;">
+                                            <input type="date" id="report-day" style="flex: 1; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; padding: 0.45rem 0.6rem; color: var(--text-primary); font-family: inherit; font-size: 0.8rem; outline: none;">
+                                            <button class="btn btn-primary btn-sm" id="btn-download-daily-report" style="padding: 0.45rem 0.85rem; font-size: 0.8rem; white-space: nowrap;" data-i18n="downloadDailyBtn">
+                                                <i class="fas fa-download"></i> Daily
+                                            </button>
+                                        </div>
+                                    </div>
 
-                        <div class="form-group" style="margin-bottom: 1.5rem;">
-                            <label for="report-day" data-i18n="selectDateLabel">Select Date</label>
-                            <input type="date" id="report-day" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 8px; padding: 0.65rem; color: var(--text-primary); font-family: inherit; width: 100%; outline: none; box-sizing: border-box;">
-                        </div>
+                                    <!-- Monthly Export Section -->
+                                    <div style="background: rgba(0,0,0,0.2); border: 1px solid var(--border-color); border-radius: 8px; padding: 0.75rem; margin-bottom: 0.75rem;">
+                                        <label style="font-size: 0.78rem; font-weight: 500; color: var(--text-primary); margin-bottom: 0.35rem; display: block;" data-i18n="exportMonthlyTitle">Export Monthly Report</label>
+                                        <div style="display: flex; gap: 0.5rem;">
+                                            <select id="report-month" style="flex: 1; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; padding: 0.45rem 0.6rem; color: var(--text-primary); font-family: inherit; font-size: 0.8rem; outline: none; cursor: pointer;">
+                                                <option value="" data-i18n="thisMonthLabel">Current Month</option>
+                                            </select>
+                                            <button class="btn btn-primary btn-sm" id="btn-download-report" style="padding: 0.45rem 0.85rem; font-size: 0.8rem; white-space: nowrap;" data-i18n="downloadMonthlyBtn">
+                                                <i class="fas fa-download"></i> Monthly
+                                            </button>
+                                        </div>
+                                    </div>
 
-                        <button class="btn btn-primary btn-block" id="btn-download-daily-report" style="margin-bottom: 1.5rem;" data-i18n="downloadDailyBtn">
-                            <i class="fas fa-download"></i> Download Daily Report
-                        </button>
-
-                        <div class="report-divider"></div>
-
-                        <h3 style="font-family: var(--font-heading); margin-bottom: 0.5rem; font-size: 1rem; margin-top: 1.5rem;"><i class="fas fa-file-excel" style="color: #10b981; margin-right: 0.5rem;"></i><span data-i18n="exportMonthlyTitle">Export Monthly Report</span></h3>
-                        <p class="field-desc" data-i18n="exportMonthlyDesc">Download an Excel spreadsheet showing all replies for a selected month. Columns = days, rows = phone numbers.</p>
-
-                        <div class="form-group" style="margin-bottom: 1.5rem;">
-                            <label for="report-month" data-i18n="selectMonthLabel">Select Month</label>
-                            <select id="report-month" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 8px; padding: 0.65rem; color: var(--text-primary); font-family: inherit; width: 100%; outline: none; cursor: pointer; appearance: none;">
-                                <option value="" data-i18n="thisMonthLabel">Current Month</option>
-                            </select>
-                        </div>
-
-                        <button class="btn btn-primary btn-block" id="btn-download-report" style="margin-bottom: 1.5rem;" data-i18n="downloadMonthlyBtn">
-                            <i class="fas fa-download"></i> Download Monthly Report
-                        </button>
-
-                        <button class="btn btn-secondary btn-block" id="btn-clear-reports" style="background: rgba(239, 68, 68, 0.1); color: var(--danger); border: 1px solid rgba(239, 68, 68, 0.2);" data-i18n="clearReportsBtn">
-                            <i class="fas fa-trash-alt"></i> Clear Reports History
-                        </button>
-
-                        <div class="report-divider"></div>
-
-                        <h3 style="font-family: var(--font-heading); margin-bottom: 0.5rem; font-size: 1rem; margin-top: 1.5rem;"><i class="fas fa-clock" style="color: #10b981; margin-right: 0.5rem;"></i><span data-i18n="reportGatheringTitle">Report Gathering Window</span></h3>
-                        <p class="field-desc" data-i18n="reportGatheringDesc">Limit which hours of the day replies will be logged. Replies outside the window will be ignored by the report.</p>
-
-                        <div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1rem;">
-                            <label class="switch">
-                                <input type="checkbox" id="gathering-limit-toggle">
-                                <span class="slider"></span>
-                            </label>
-                            <span style="font-size: 0.9rem; color: var(--text-secondary);" data-i18n="enableGatheringLimit">Enable gathering time limit</span>
-                        </div>
-
-                        <div id="gathering-time-fields" style="display: none;">
-                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
-                                <div class="form-group" style="margin: 0;">
-                                    <label for="gathering-start-time" data-i18n="startTimeIsrael">Start Time (Israel)</label>
-                                    <input type="time" id="gathering-start-time" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 8px; padding: 0.65rem; color: var(--text-primary); font-family: inherit; width: 100%; outline: none; box-sizing: border-box;">
+                                    <button class="btn btn-secondary btn-sm btn-block" id="btn-clear-reports" style="background: rgba(239, 68, 68, 0.1); color: var(--danger); border: 1px solid rgba(239, 68, 68, 0.2); padding: 0.4rem; font-size: 0.78rem;" data-i18n="clearReportsBtn">
+                                        <i class="fas fa-trash-alt"></i> Clear Reports History
+                                    </button>
                                 </div>
-                                <div class="form-group" style="margin: 0;">
-                                    <label for="gathering-end-time" data-i18n="endTimeIsrael">End Time (Israel)</label>
-                                    <input type="time" id="gathering-end-time" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 8px; padding: 0.65rem; color: var(--text-primary); font-family: inherit; width: 100%; outline: none; box-sizing: border-box;">
+
+                                <!-- Card 2: Report Gathering Window -->
+                                <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-color); border-radius: 12px; padding: 1rem;">
+                                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                                        <h4 style="font-family: var(--font-heading); font-size: 0.9rem; margin: 0; display: flex; align-items: center; gap: 0.5rem; color: var(--text-primary);">
+                                            <i class="fas fa-clock" style="color: #10b981;"></i>
+                                            <span data-i18n="reportGatheringTitle">Gathering Time Window</span>
+                                        </h4>
+                                        <label class="switch" style="transform: scale(0.85);">
+                                            <input type="checkbox" id="gathering-limit-toggle">
+                                            <span class="slider"></span>
+                                        </label>
+                                    </div>
+                                    <p style="font-size: 0.75rem; color: var(--text-secondary); margin-bottom: 0.75rem;" data-i18n="reportGatheringDesc">Limit hours replies are logged into reports.</p>
+
+                                    <div id="gathering-time-fields" style="display: none;">
+                                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-bottom: 0.75rem;">
+                                            <div>
+                                                <label style="font-size: 0.72rem; color: var(--text-secondary);" data-i18n="startTimeIsrael">Start Time</label>
+                                                <input type="time" id="gathering-start-time" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; padding: 0.4rem; color: var(--text-primary); font-family: inherit; font-size: 0.8rem; width: 100%; box-sizing: border-box;">
+                                            </div>
+                                            <div>
+                                                <label style="font-size: 0.72rem; color: var(--text-secondary);" data-i18n="endTimeIsrael">End Time</label>
+                                                <input type="time" id="gathering-end-time" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; padding: 0.4rem; color: var(--text-primary); font-family: inherit; font-size: 0.8rem; width: 100%; box-sizing: border-box;">
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <button class="btn btn-primary btn-sm btn-block" id="btn-save-gathering-settings" style="padding: 0.45rem; font-size: 0.8rem;" data-i18n="saveGatheringBtn">
+                                        <i class="fas fa-save"></i> Save Window Settings
+                                    </button>
                                 </div>
+
                             </div>
-                        </div>
 
-                        <button class="btn btn-primary btn-block" id="btn-save-gathering-settings" style="margin-bottom: 1.5rem;" data-i18n="saveGatheringBtn">
-                            <i class="fas fa-save"></i> Save Gathering Settings
-                        </button>
+                            <!-- Right Column: Sources & Recent Replies Feed -->
+                            <div style="display: flex; flex-direction: column; gap: 1rem;">
+                                
+                                <!-- Card 3: Report Source Chats -->
+                                <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-color); border-radius: 12px; padding: 1rem;">
+                                    <h4 style="font-family: var(--font-heading); font-size: 0.9rem; margin: 0 0 0.5rem 0; display: flex; align-items: center; gap: 0.5rem; color: var(--text-primary);">
+                                        <i class="fas fa-filter" style="color: #10b981;"></i>
+                                        <span data-i18n="reportSourceTitle">Report Source Chats</span>
+                                    </h4>
+                                    <p style="font-size: 0.75rem; color: var(--text-secondary); margin-bottom: 0.75rem;" data-i18n="reportSourceDesc">Only log replies from these specific contacts/groups.</p>
 
-                        <div class="report-divider"></div>
+                                    <div style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
+                                        <button class="btn btn-secondary btn-sm" id="btn-report-add-contact" style="flex:1; font-size:0.78rem; padding: 0.45rem;" data-i18n="addContactBtn">
+                                            <i class="fas fa-user-plus"></i> Add Contact
+                                        </button>
+                                        <button class="btn btn-secondary btn-sm" id="btn-report-add-group" style="flex:1; font-size:0.78rem; padding: 0.45rem;" data-i18n="addGroupBtn">
+                                            <i class="fas fa-users"></i> Add Group
+                                        </button>
+                                    </div>
 
-                        <h3 style="font-family: var(--font-heading); margin-bottom: 0.5rem; font-size: 1rem; margin-top: 1.5rem;"><i class="fas fa-filter" style="color: #10b981; margin-right: 0.5rem;"></i><span data-i18n="reportSourceTitle">Report Source Chats</span></h3>
-                        <p class="field-desc" data-i18n="reportSourceDesc">Only log replies from these specific contacts or groups. Leave empty to gather from all automation targets.</p>
+                                    <div id="report-sources-chips" style="display: flex; flex-wrap: wrap; gap: 0.4rem; max-height: 80px; overflow-y: auto; margin-bottom: 0.75rem; padding: 0.35rem 0;"></div>
 
-                        <div style="display: flex; gap: 0.75rem; margin-bottom: 1rem;">
-                            <button class="btn btn-secondary" id="btn-report-add-contact" style="flex:1; font-size:0.85rem; padding: 0.6rem 0.75rem;" data-i18n="addContactBtn">
-                                <i class="fas fa-user-plus"></i> Add Contact
-                            </button>
-                            <button class="btn btn-secondary" id="btn-report-add-group" style="flex:1; font-size:0.85rem; padding: 0.6rem 0.75rem;" data-i18n="addGroupBtn">
-                                <i class="fas fa-users"></i> Add Group
-                            </button>
-                        </div>
-
-                        <div id="report-sources-chips" style="display: flex; flex-wrap: wrap; gap: 0.5rem; min-height: 2rem; margin-bottom: 1rem; padding: 0.5rem 0;"></div>
-
-                        <button class="btn btn-primary btn-block" id="btn-save-report-sources" data-i18n="saveReportSourcesBtn">
-                            <i class="fas fa-save"></i> Save Report Sources
-                        </button>
-
-                        <div class="recent-replies-section" style="margin-top: 1.5rem;">
-                            <h3 style="font-family: var(--font-heading); margin-bottom: 0.75rem; font-size: 1rem;"><i class="fas fa-clock-rotate-left" style="color: #10b981; margin-right: 0.5rem;"></i><span data-i18n="recentRepliesTitle">Recent Replies</span></h3>
-                            <div class="recent-replies-list" id="recent-replies">
-                                <div class="no-replies-placeholder">
-                                    <i class="fas fa-inbox"></i>
-                                    <p data-i18n="noRepliesPlaceholder">No replies recorded yet. Incoming messages will appear here in real-time.</p>
+                                    <button class="btn btn-primary btn-sm btn-block" id="btn-save-report-sources" style="padding: 0.45rem; font-size: 0.8rem;" data-i18n="saveReportSourcesBtn">
+                                        <i class="fas fa-save"></i> Save Sources
+                                    </button>
                                 </div>
+
+                                <!-- Card 4: Recent Replies Live Feed -->
+                                <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-color); border-radius: 12px; padding: 1rem;">
+                                    <h4 style="font-family: var(--font-heading); font-size: 0.9rem; margin: 0 0 0.75rem 0; display: flex; align-items: center; gap: 0.5rem; color: var(--text-primary);">
+                                        <i class="fas fa-clock-rotate-left" style="color: #10b981;"></i>
+                                        <span data-i18n="recentRepliesTitle">Recent Replies</span>
+                                    </h4>
+                                    <div class="recent-replies-list" id="recent-replies" style="max-height: 180px; overflow-y: auto;">
+                                        <div class="no-replies-placeholder">
+                                            <i class="fas fa-inbox"></i>
+                                            <p data-i18n="noRepliesPlaceholder">No replies recorded yet. Incoming messages will appear here in real-time.</p>
+                                        </div>
+                                    </div>
+                                </div>
+
                             </div>
+
                         </div>
                     </div>
                 </div>
@@ -480,6 +508,7 @@
                 thisMonthLabel: 'This Month',
                 todayLabel: 'Today',
                 uniqueContactsLabel: 'Unique Contacts',
+                exportReportsTitle: 'Export Excel Reports',
                 exportDailyTitle: 'Export Daily Report',
                 exportDailyDesc: 'Download a focused Excel spreadsheet showing all replies for a specific day in a clean chronological table.',
                 selectDateLabel: 'Select Date',
@@ -611,6 +640,7 @@
                 thisMonthLabel: 'החודש',
                 todayLabel: 'היום',
                 uniqueContactsLabel: 'אנשי קשר ייחודיים',
+                exportReportsTitle: 'ייצוא דוחות אקסל',
                 exportDailyTitle: 'ייצוא דוח יומי',
                 exportDailyDesc: 'הורד קובץ אקסל ממוקד המציג את כל התגובות ליום מסוים בטבלה כרונולוגית נקייה.',
                 selectDateLabel: 'בחר תאריך',
