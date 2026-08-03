@@ -754,54 +754,102 @@ function initializeWhatsAppClient() {
         logReply(phone, displayName, isGroup ? `[Group Chat] ${messageText}` : messageText);
         debugLog(eventSource, `Reply logged. repliesData keys: ${JSON.stringify(Object.keys(repliesData))}`);
 
-        // Check if chatbot is enabled
-        if (!chatbotConfig.enabled) {
-            debugLog(eventSource, `Chatbot is DISABLED, skipping rule matching.`);
-            return;
-        }
-
-        // === CHATBOT: Skip media messages entirely ===
+        // === CHATBOT HANDLING ===
         if (msg.hasMedia) {
             debugLog(eventSource, `Chatbot skipping media message (type: ${msg.type}).`);
             return;
         }
 
-        // === CHATBOT: Only match if body is purely the trigger — no surrounding text ===
-        // Normalise: collapse all unicode whitespace and strip any trailing punctuation that isn't part of the trigger
         const bodyForTrigger = msg.body ? msg.body.trim() : '';
         if (!bodyForTrigger) {
             debugLog(eventSource, `Chatbot skipping empty message body.`);
             return;
         }
 
-        debugLog(eventSource, `Chatbot ENABLED. Checking ${chatbotConfig.rules.length} rules against: "${incomingText}"`);
+        let scheduleAutoReplied = false;
 
-        for (const rule of chatbotConfig.rules) {
-            if (!rule.trigger || !rule.reply) continue;
+        // 1. Check schedule-specific chatbots first
+        if (scheduleConfig && Array.isArray(scheduleConfig.schedules)) {
+            for (const sch of scheduleConfig.schedules) {
+                if (sch.enabled === false || sch.chatbotEnabled === false) continue;
+                if (!sch.chatbotRules || !Array.isArray(sch.chatbotRules) || sch.chatbotRules.length === 0) continue;
 
-            const triggers = rule.trigger.split(',').map(t => t.trim().toLowerCase());
-            debugLog(eventSource, `Checking rule: triggers=[${triggers.join(', ')}] against "${incomingText}"`);
+                const schContacts = sch.contacts || [];
+                const isContactInSchedule = schContacts.some(c => {
+                    const cRaw = (c.phone || '').split('|')[0].trim();
+                    const cPhone = cRaw.split('@')[0];
+                    const rPhone = resolvedFrom.split('@')[0];
+                    const sPhone = sender.split('@')[0];
+                    const fPhone = msg.from.split('@')[0];
+                    return cRaw === resolvedFrom || cRaw === msg.from || cRaw === sender ||
+                           (cPhone && (cPhone === rPhone || cPhone === sPhone || cPhone === fPhone));
+                });
 
-            // Strict exact match: the ENTIRE trimmed message must equal the trigger
-            if (triggers.includes(incomingText)) {
-                debugLog(eventSource, `TRIGGER MATCHED "${incomingText}". Replying: "${rule.reply}"`);
-                
-                try {
-                    await msg.reply(rule.reply);
-                    debugLog(eventSource, `Auto-reply sent successfully!`);
-
-                    io.emit('automation_log', { 
-                        message: `🤖 Auto-replied to ${displayName} (Matched: "${incomingText}") -> "${rule.reply}"`, 
-                        type: 'success' 
-                    });
-                } catch (err) {
-                    debugLog(eventSource, `FAILED to send auto-reply: ${err.message}`);
-                    io.emit('automation_log', { 
-                        message: `⚠️ Failed to send auto-reply to ${displayName}: ${err.message}`, 
-                        type: 'error' 
-                    });
+                if (isContactInSchedule) {
+                    for (const rule of sch.chatbotRules) {
+                        if (!rule.trigger || !rule.reply) continue;
+                        const triggers = rule.trigger.split(',').map(t => t.trim().toLowerCase());
+                        if (triggers.includes(incomingText)) {
+                            debugLog(eventSource, `SCHEDULE CHATBOT MATCHED "${incomingText}" in schedule "${sch.name}". Replying: "${rule.reply}"`);
+                            try {
+                                await msg.reply(rule.reply);
+                                debugLog(eventSource, `Schedule auto-reply sent successfully!`);
+                                io.emit('automation_log', {
+                                    message: `🤖 [Schedule: ${sch.name || 'Schedule'}] Auto-replied to ${displayName} (Matched: "${incomingText}") -> "${rule.reply}"`,
+                                    type: 'success'
+                                });
+                            } catch (err) {
+                                debugLog(eventSource, `FAILED to send schedule auto-reply: ${err.message}`);
+                                io.emit('automation_log', {
+                                    message: `⚠️ Failed to send schedule auto-reply to ${displayName}: ${err.message}`,
+                                    type: 'error'
+                                });
+                            }
+                            scheduleAutoReplied = true;
+                            break;
+                        }
+                    }
                 }
-                break;
+                if (scheduleAutoReplied) break;
+            }
+        }
+
+        // 2. Global Chatbot fallback if no schedule rule matched
+        if (!scheduleAutoReplied) {
+            if (!chatbotConfig.enabled) {
+                debugLog(eventSource, `Global chatbot is DISABLED, skipping rule matching.`);
+                return;
+            }
+
+            debugLog(eventSource, `Chatbot ENABLED. Checking ${chatbotConfig.rules.length} global rules against: "${incomingText}"`);
+
+            for (const rule of chatbotConfig.rules) {
+                if (!rule.trigger || !rule.reply) continue;
+
+                const triggers = rule.trigger.split(',').map(t => t.trim().toLowerCase());
+                debugLog(eventSource, `Checking rule: triggers=[${triggers.join(', ')}] against "${incomingText}"`);
+
+                // Strict exact match: the ENTIRE trimmed message must equal the trigger
+                if (triggers.includes(incomingText)) {
+                    debugLog(eventSource, `TRIGGER MATCHED "${incomingText}". Replying: "${rule.reply}"`);
+                    
+                    try {
+                        await msg.reply(rule.reply);
+                        debugLog(eventSource, `Auto-reply sent successfully!`);
+
+                        io.emit('automation_log', { 
+                            message: `🤖 Auto-replied to ${displayName} (Matched: "${incomingText}") -> "${rule.reply}"`, 
+                            type: 'success' 
+                        });
+                    } catch (err) {
+                        debugLog(eventSource, `FAILED to send auto-reply: ${err.message}`);
+                        io.emit('automation_log', { 
+                            message: `⚠️ Failed to send auto-reply to ${displayName}: ${err.message}`, 
+                            type: 'error' 
+                        });
+                    }
+                    break;
+                }
             }
         }
     }
