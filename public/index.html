@@ -20,8 +20,8 @@
             <div class="logo">
                 <i class="fab fa-whatsapp logo-icon"></i>
                 <div>
-                    <h1>WhatsApp Automator</h1>
-                    <p>Send personalized messages seamlessly</p>
+                    <h1 data-i18n="appTitle">WhatsApp Automator</h1>
+                    <p data-i18n="appSubtitle">Send personalized messages seamlessly</p>
                 </div>
             </div>
             <div style="display: flex; align-items: center; gap: 0.75rem;">
@@ -431,11 +431,73 @@
         // ============================================================
         //  i18n Language System (English / Hebrew)
         // ============================================================
+        // ============================================================
+        //  i18n Language System (English / Hebrew)
+        // ============================================================
         let currentLang = localStorage.getItem('app_lang') || 'en';
 
         const i18n = {
             en: {
                 langName: 'עברית',
+                appTitle: 'WhatsApp Automator',
+                appSubtitle: 'Send personalized messages seamlessly',
+                logoutBtn: 'Log Out',
+                connectingServer: 'Connecting Server...',
+                serverConnected: 'Server Connected',
+                serverOffline: 'Server Offline',
+                connStatus: 'Connection Status',
+                waitingQr: 'Waiting for WhatsApp client initialization...',
+                connSuccessTitle: 'Successfully Connected!',
+                connSuccessDesc: 'WhatsApp Client is authenticated and ready to automate.',
+                disconnectSession: 'Disconnect Session',
+                howToConnTitle: 'How to connect:',
+                step1: 'Open WhatsApp on your mobile phone.',
+                step2: 'Tap Menu (Android) or Settings (iOS) > Linked Devices.',
+                step3: 'Tap Link a Device.',
+                step4: "Point your phone's camera at the QR code above.",
+                diagTitle: 'Diagnostics & Troubleshoot',
+                serverUptime: 'Server Uptime:',
+                nodeMemory: 'Node Memory (RSS):',
+                targetedContacts: 'Targeted Contacts:',
+                restartClientBtn: 'Restart WhatsApp Client',
+                automationTitle: 'Message Automation',
+                tabPaste: 'Paste Contacts',
+                tabSchedule: 'Scheduler',
+                tabChatbot: 'Chatbot',
+                tabReports: 'Reports',
+                pasteDesc: 'Enter phone numbers (with country code, e.g., 972500000000) and message content. Format: Phone|Name|Custom Message (One per line). Name and message are optional.',
+                addGroupBtn: 'Add Group',
+                addContactBtn: 'Add Contact',
+                contactsPlaceholder: '972500000000|John Doe|Hi John, testing automation!\n972500000001|Jane Smith|Hello Jane!',
+                minDelayLabel: 'Min Delay (sec)',
+                maxDelayLabel: 'Max Delay (sec)',
+                startAutomationBtn: 'Start Sending Messages',
+                consoleTitle: 'Execution Logs',
+                clearConsoleBtn: 'Clear',
+                stopResetBtn: 'Stop / Reset',
+                schedEventsTitle: 'Scheduled Events',
+                schedEventsDesc: 'Manage recurring daily automated messages',
+                createScheduleBtn: 'Create Schedule',
+                noSchedTitle: 'No Schedules Created',
+                noSchedDesc: 'Set up automatic daily WhatsApp messages to your contacts or groups.',
+                getStartedBtn: 'Get Started',
+                createSchedModalTitle: 'Create Scheduled Event',
+                editSchedModalTitle: 'Edit Scheduled Event',
+                schedNameLabel: 'Schedule Name',
+                schedNamePlaceholder: 'e.g. Morning Greetings',
+                targetContactsLabel: 'Target Contacts',
+                defaultMsgLabel: 'Default Message',
+                defaultMsgPlaceholder: 'Type the message to broadcast daily...',
+                triggerTimeLabel: 'Trigger Time (Daily)',
+                timezoneLabel: 'Timezone',
+                schedChatbotTitle: 'Schedule Chatbot Messenger',
+                schedChatbotDesc: 'Set custom auto-reply rules for contacts in this schedule when they reply.',
+                addAutoReplyRuleBtn: 'Add Auto-Reply Rule',
+                enableSchedLabel: 'Enable Scheduled Event',
+                cancelBtn: 'Cancel',
+                saveSchedBtn: 'Save Schedule',
+                ruleTriggerPlaceholder: 'Trigger e.g. 1, fine',
+                ruleReplyPlaceholder: 'Auto-reply message',
                 chatbotBannerActive: 'Chatbot Status: Active',
                 chatbotBannerDisabled: 'Chatbot Status: Disabled',
                 chatbotDesc: 'Define automated auto-responses when people reply to your messages. Multiple triggers can be separated by commas (e.g. 1, fine, good).',
@@ -443,11 +505,7 @@
                 disableChatbotBtn: 'Disable Chatbot',
                 enableChatbotBtn: 'Enable Chatbot',
                 saveChatbotRulesBtn: 'Save Auto-Reply Rules',
-                ruleTriggerPlaceholder: 'Trigger e.g. 1, fine',
-                ruleReplyPlaceholder: 'Auto-reply message',
-                consoleTitle: 'Execution Logs',
-                clearConsoleBtn: 'Clear',
-                stopResetBtn: 'Stop / Reset',
+                reportsBanner: 'Reply Tracking — All incoming messages are logged automatically',
                 thisMonthLabel: 'This Month',
                 todayLabel: 'Today',
                 uniqueContactsLabel: 'Unique Contacts',
@@ -471,12 +529,83 @@
                 saveReportSourcesBtn: 'Save Report Sources',
                 recentRepliesTitle: 'Recent Replies',
                 noRepliesPlaceholder: 'No replies recorded yet. Incoming messages will appear here in real-time.',
-                reportsBanner: 'Reply Tracking — All incoming messages are logged automatically',
-                addContactBtn: 'Add Contact',
-                addGroupBtn: 'Add Group'
+                noSourcesSelected: 'No sources selected — gathering from all automation contacts',
+                selectGroupTitle: 'Select a WhatsApp Group',
+                searchGroupsPlaceholder: 'Search groups by name or ID...',
+                selectContactTitle: 'Select a WhatsApp Contact',
+                searchContactsPlaceholder: 'Search contacts by name or number...',
+                multiSelectMode: 'Multi-Select Mode',
+                selectedCount: 'Selected',
+                addSelectedBtn: 'Add Selected Contacts',
+                activeStatus: 'Active',
+                disabledStatus: 'Disabled',
+                targetsCount: 'Target',
+                targetsCountPlural: 'Targets',
+                chatbotOff: 'Chatbot: Off',
+                chatbotRulesCount: 'Chatbot: {count} rule',
+                chatbotRulesCountPlural: 'Chatbot: {count} rules'
             },
             he: {
                 langName: 'English',
+                appTitle: 'אוטומציית וואטסאפ',
+                appSubtitle: 'שליחת הודעות מותאמות אישית בקלות ובמהירות',
+                logoutBtn: 'התנתק',
+                connectingServer: 'מתחבר לשרת...',
+                serverConnected: 'שרת מחובר',
+                serverOffline: 'שרת לא מחובר',
+                connStatus: 'סטאטוס חיבור',
+                waitingQr: 'ממתין לאתחול חיבור וואטסאפ...',
+                connSuccessTitle: 'התחברת בהצלחה!',
+                connSuccessDesc: 'חשבון הוואטסאפ מחובר ומוכן לפעולה.',
+                disconnectSession: 'נתק הפעלה',
+                howToConnTitle: 'איך להתחבר:',
+                step1: 'פתחו את וואטסאפ בטלפון הנייד.',
+                step2: 'לחצו על תפריט (אנדרואיד) או הגדרות (אייפון) > מכשירים מקושרים.',
+                step3: 'לחצו על קשר מכשיר.',
+                step4: 'כוונו את מצלמת הטלפון אל קוד ה-QR שמופיע למעלה.',
+                diagTitle: 'דיאגנוסטיקה ותקציבים',
+                serverUptime: 'זמן פעילות שרת:',
+                nodeMemory: 'זיכרון Node (RSS):',
+                targetedContacts: 'אנשי קשר ממוקדים:',
+                restartClientBtn: 'אפס והפעל מחדש את וואטסאפ',
+                automationTitle: 'אוטומציית הודעות',
+                tabPaste: 'הדבקת אנשי קשר',
+                tabSchedule: 'מתזמן הודעות',
+                tabChatbot: "צ'אטבוט",
+                tabReports: 'דוחות',
+                pasteDesc: 'הזינו מספרי טלפון (כולל קידומת מדינה, למשל 972500000000) ותוכן הודעה. פורמט: טלפון|שם|הודעה (שורה לכל איש קשר). שם והודעה אינם חובה.',
+                addGroupBtn: 'הוסף קבוצה',
+                addContactBtn: 'הוסף איש קשר',
+                contactsPlaceholder: '972500000000|ישראל ישראלי|שלום ישראל, בדיקת אוטומציה!\n972500000001|ישראלה|שלום ישראלה!',
+                minDelayLabel: 'השהיה מינימלית (שניות)',
+                maxDelayLabel: 'השהיה מקסימלית (שניות)',
+                startAutomationBtn: 'התחל שליחת הודעות',
+                consoleTitle: 'יומן פעילות אוטומציה',
+                clearConsoleBtn: 'נקה יומן',
+                stopResetBtn: 'עצור / אפס',
+                schedEventsTitle: 'אירועים מתוזמנים',
+                schedEventsDesc: 'ניהול הודעות יומיומיות אוטומטיות',
+                createScheduleBtn: 'צור תזמון חדש',
+                noSchedTitle: 'אין עדיין הודעות מתוזמנות',
+                noSchedDesc: 'צור את התזמון הראשון שלך כדי להתחיל לשלוח הודעות אוטומטיות.',
+                getStartedBtn: 'להתחלה',
+                createSchedModalTitle: 'צור אירוע מתוזמן',
+                editSchedModalTitle: 'ערוך אירוע מתוזמן',
+                schedNameLabel: 'שם התזמון',
+                schedNamePlaceholder: 'למשל: ברכת בוקר טוב',
+                targetContactsLabel: 'אנשי קשר יעד',
+                defaultMsgLabel: 'הודעת ברירת מחדל',
+                defaultMsgPlaceholder: 'הקלד את ההודעה לשליחה יומית...',
+                triggerTimeLabel: 'זמן הפעלה (יומי)',
+                timezoneLabel: 'אזור זמן',
+                schedChatbotTitle: "צ'אטבוט משיב לתזמון זה",
+                schedChatbotDesc: 'הגדר חוקי מענה אוטומטי לאנשי קשר בתזמון זה כאשר הם משיבים.',
+                addAutoReplyRuleBtn: 'הוסף חוק מענה אוטומטי',
+                enableSchedLabel: 'הפעל אירוע מתוזמן',
+                cancelBtn: 'ביטול',
+                saveSchedBtn: 'שמור תזמון',
+                ruleTriggerPlaceholder: 'טריגר למשל 1, מעולה',
+                ruleReplyPlaceholder: 'הודעת מענה אוטומטי',
                 chatbotBannerActive: "סטאטוס צ'אטבוט: פעיל",
                 chatbotBannerDisabled: "סטאטוס צ'אטבוט: מנוטרל",
                 chatbotDesc: 'הגדר מענים אוטומטיים כאשר אנשים משיבים להודעות שלך. ניתן להפריד מילות מפתח בפסיקים (למשל: 1, מעולה, כן).',
@@ -484,11 +613,7 @@
                 disableChatbotBtn: "נטרל צ'אטבוט",
                 enableChatbotBtn: "הפעל צ'אטבוט",
                 saveChatbotRulesBtn: 'שמור חוקי מענה אוטומטי',
-                ruleTriggerPlaceholder: 'טריגר למשל 1, מעולה',
-                ruleReplyPlaceholder: 'הודעת מענה אוטומטי',
-                consoleTitle: 'יומן פעילות אוטומציה',
-                clearConsoleBtn: 'נקה יומן',
-                stopResetBtn: 'עצור / אפס',
+                reportsBanner: 'מעקב תגובות — כל ההודעות הנכנסות נרשמות אוטומטית',
                 thisMonthLabel: 'החודש',
                 todayLabel: 'היום',
                 uniqueContactsLabel: 'אנשי קשר ייחודיים',
@@ -512,9 +637,21 @@
                 saveReportSourcesBtn: "שמור צ'אטים למעקב",
                 recentRepliesTitle: 'תגובות אחרונות',
                 noRepliesPlaceholder: 'טרם נרשמו תגובות. הודעות נכנסות יופיעו כאן בזמן אמת.',
-                reportsBanner: 'מעקב תגובות — כל ההודעות הנכנסות נרשמות אוטומטית',
-                addContactBtn: 'הוסף איש קשר',
-                addGroupBtn: 'הוסף קבוצה'
+                noSourcesSelected: 'לא נבחרו מקורות — איסוף מכל אנשי הקשר באוטומציה',
+                selectGroupTitle: 'בחר קבוצת וואטסאפ',
+                searchGroupsPlaceholder: 'חפש קבוצות לפי שם או מזהה...',
+                selectContactTitle: 'בחר איש קשר מהוואטסאפ',
+                searchContactsPlaceholder: 'חפש אנשי קשר לפי שם או מספר...',
+                multiSelectMode: 'מצב בחירה מרובה',
+                selectedCount: 'נבחרו',
+                addSelectedBtn: 'הוסף אנשי קשר שנבחרו',
+                activeStatus: 'פעיל',
+                disabledStatus: 'מנוטרל',
+                targetsCount: 'יעד',
+                targetsCountPlural: 'יעדים',
+                chatbotOff: "צ'אטבוט: מבוטל",
+                chatbotRulesCount: "צ'אטבוט: חוק {count}",
+                chatbotRulesCountPlural: "צ'אטבוט: {count} חוקים"
             }
         };
 
@@ -525,6 +662,9 @@
             document.documentElement.dir = lang === 'he' ? 'rtl' : 'ltr';
 
             const t = i18n[lang] || i18n.en;
+
+            const langTextEl = document.getElementById('lang-toggle-text');
+            if (langTextEl) langTextEl.textContent = t.langName;
 
             document.querySelectorAll('[data-i18n]').forEach(el => {
                 const key = el.getAttribute('data-i18n');
@@ -539,7 +679,22 @@
                 }
             });
 
-            if (typeof updateChatbotToggleUI === 'function') updateChatbotToggleUI();
+            document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
+                const key = el.getAttribute('data-i18n-placeholder');
+                if (t[key] !== undefined) {
+                    el.placeholder = t[key];
+                }
+            });
+
+            if (typeof renderSchedules === 'function' && scheduleConfig && scheduleConfig.schedules) {
+                renderSchedules(scheduleConfig.schedules);
+            }
+            if (typeof updateChatbotToggleUI === 'function') {
+                updateChatbotToggleUI();
+            }
+            if (typeof renderReportSourceChips === 'function') {
+                renderReportSourceChips();
+            }
         }
 
         if (btnLangToggle) {
@@ -559,7 +714,7 @@
             document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
             document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
             
-            const tabMap = { paste: 1, csv: 2, schedule: 3, chatbot: 4, reports: 5 };
+            const tabMap = { paste: 1, schedule: 2, chatbot: 3, reports: 4 };
             const idx = tabMap[tab] || 1;
             document.querySelector(`.tab-btn:nth-child(${idx})`).classList.add('active');
             document.getElementById(`tab-${tab}`).classList.add('active');
@@ -1662,6 +1817,7 @@
         function renderSchedules(schedulesList) {
             const container = document.getElementById('schedules-container');
             const emptyState = document.getElementById('schedules-empty');
+            const t = i18n[currentLang] || i18n.en;
             
             container.innerHTML = '';
             
@@ -1678,35 +1834,46 @@
                 
                 const contactsCount = schedule.contacts ? schedule.contacts.length : 0;
                 const statusBadgeClass = schedule.enabled ? 'badge badge-active' : 'badge badge-inactive';
-                const statusText = schedule.enabled ? 'Active' : 'Disabled';
+                const statusText = schedule.enabled ? t.activeStatus : t.disabledStatus;
                 const toggleIcon = schedule.enabled ? 'fa-pause' : 'fa-play';
-                const toggleTitle = schedule.enabled ? 'Pause' : 'Activate';
-                
+                const toggleTitle = schedule.enabled ? (currentLang === 'he' ? 'השהה' : 'Pause') : (currentLang === 'he' ? 'הפעל' : 'Start');
+                const toggleBtnText = schedule.enabled ? (currentLang === 'he' ? 'השהה' : 'Pause') : (currentLang === 'he' ? 'הפעל' : 'Start');
+                const editBtnText = currentLang === 'he' ? 'ערוך' : 'Edit';
+                const targetsLabel = contactsCount === 1 ? t.targetsCount : t.targetsCountPlural;
+                const defaultSchName = currentLang === 'he' ? 'תזמון ללא שם' : 'Unnamed Schedule';
+
                 const chatbotRuleCount = (schedule.chatbotRules && Array.isArray(schedule.chatbotRules)) ? schedule.chatbotRules.length : 0;
+                let chatbotBadgeText = t.chatbotOff;
+                if (schedule.chatbotEnabled !== false && chatbotRuleCount > 0) {
+                    chatbotBadgeText = chatbotRuleCount === 1
+                        ? t.chatbotRulesCount.replace('{count}', chatbotRuleCount)
+                        : t.chatbotRulesCountPlural.replace('{count}', chatbotRuleCount);
+                }
+
                 const chatbotBadge = (schedule.chatbotEnabled !== false && chatbotRuleCount > 0)
-                    ? `<span style="color: #10b981;"><i class="fas fa-robot"></i> Chatbot: ${chatbotRuleCount} rule${chatbotRuleCount === 1 ? '' : 's'}</span>`
-                    : `<span style="color: var(--text-secondary);"><i class="fas fa-robot"></i> Chatbot: Off</span>`;
+                    ? `<span style="color: #10b981;"><i class="fas fa-robot"></i> ${chatbotBadgeText}</span>`
+                    : `<span style="color: var(--text-secondary);"><i class="fas fa-robot"></i> ${chatbotBadgeText}</span>`;
 
                 card.innerHTML = `
                     <div>
                         <div class="schedule-card-header">
-                            <h4 class="schedule-card-title">${escapeHtml(schedule.name || 'Unnamed Schedule')}</h4>
+                            <h4 class="schedule-card-title">${escapeHtml(schedule.name || defaultSchName)}</h4>
                             <span class="${statusBadgeClass}">${statusText}</span>
                         </div>
                         <div class="schedule-card-time" style="margin-top: 0.5rem;">
                             <i class="fas fa-clock"></i> ${schedule.time} (${schedule.timezone || 'UTC'})
                         </div>
                         <div class="schedule-card-meta" style="margin-top: 0.5rem; display: flex; gap: 1rem; flex-wrap: wrap;">
-                            <span><i class="fas fa-users"></i> ${contactsCount} Target${contactsCount === 1 ? '' : 's'}</span>
+                            <span><i class="fas fa-users"></i> ${contactsCount} ${targetsLabel}</span>
                             ${chatbotBadge}
                         </div>
                     </div>
                     <div class="schedule-card-actions">
                         <button class="btn btn-secondary btn-sm" onclick="openScheduleModal('${schedule.id}')" style="flex: 1; padding: 0.4rem; font-size: 0.8rem;">
-                            <i class="fas fa-edit"></i> Edit
+                            <i class="fas fa-edit"></i> ${editBtnText}
                         </button>
                         <button class="btn btn-secondary btn-sm" onclick="toggleScheduleStatus('${schedule.id}')" style="flex: 1; padding: 0.4rem; font-size: 0.8rem;" title="${toggleTitle}">
-                            <i class="fas ${toggleIcon}"></i> ${schedule.enabled ? 'Pause' : 'Start'}
+                            <i class="fas ${toggleIcon}"></i> ${toggleBtnText}
                         </button>
                         <button class="btn btn-secondary btn-sm" onclick="deleteSchedule('${schedule.id}')" style="background: rgba(239, 68, 68, 0.1); color: var(--danger); border-color: rgba(239, 68, 68, 0.2); padding: 0.4rem; font-size: 0.8rem;">
                             <i class="fas fa-trash-alt"></i>
