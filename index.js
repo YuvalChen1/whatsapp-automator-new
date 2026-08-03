@@ -184,8 +184,7 @@ let scheduleConfig = {
 
 // Chatbot Configuration state
 let chatbotConfig = {
-    enabled: true,
-    rules: []
+    chatbots: []
 };
 
 // Replies tracking data: { "YYYY-MM": { "DD": [ { phone, message, time } ] } }
@@ -247,8 +246,23 @@ if (fs.existsSync(SCHEDULE_FILE)) {
 if (fs.existsSync(CHATBOT_FILE)) {
     try {
         const raw = fs.readFileSync(CHATBOT_FILE, 'utf8');
-        chatbotConfig = JSON.parse(raw);
-        console.log('Loaded chatbot rules configuration:', chatbotConfig.enabled ? 'Enabled' : 'Disabled');
+        const parsed = JSON.parse(raw);
+        if (parsed.chatbots && Array.isArray(parsed.chatbots)) {
+            chatbotConfig = parsed;
+        } else {
+            chatbotConfig = {
+                chatbots: [
+                    {
+                        id: 'bot-default',
+                        name: 'Default Chatbot',
+                        enabled: parsed.enabled !== undefined ? parsed.enabled : true,
+                        isDefault: true,
+                        rules: parsed.rules || []
+                    }
+                ]
+            };
+        }
+        console.log(`Loaded chatbot configuration: ${chatbotConfig.chatbots.length} chatbots registered.`);
     } catch (e) {
         console.error('Error reading chatbot_rules.json:', e.message);
     }
@@ -771,8 +785,20 @@ function initializeWhatsAppClient() {
         // 1. Check schedule-specific chatbots first
         if (scheduleConfig && Array.isArray(scheduleConfig.schedules)) {
             for (const sch of scheduleConfig.schedules) {
-                if (sch.enabled === false || sch.chatbotEnabled === false) continue;
-                if (!sch.chatbotRules || !Array.isArray(sch.chatbotRules) || sch.chatbotRules.length === 0) continue;
+                if (sch.enabled === false || sch.chatbotEnabled === false || sch.chatbotMode === 'off') continue;
+
+                // Determine active rules for this schedule
+                let rulesToEvaluate = [];
+                if (sch.chatbotMode === 'existing' && sch.chatbotId) {
+                    const targetBot = (chatbotConfig.chatbots || []).find(b => b.id === sch.chatbotId);
+                    if (targetBot && targetBot.enabled !== false && Array.isArray(targetBot.rules)) {
+                        rulesToEvaluate = targetBot.rules;
+                    }
+                } else if (sch.chatbotRules && Array.isArray(sch.chatbotRules)) {
+                    rulesToEvaluate = sch.chatbotRules;
+                }
+
+                if (rulesToEvaluate.length === 0) continue;
 
                 const schContacts = sch.contacts || [];
                 const isContactInSchedule = schContacts.some(c => {
@@ -786,7 +812,7 @@ function initializeWhatsAppClient() {
                 });
 
                 if (isContactInSchedule) {
-                    for (const rule of sch.chatbotRules) {
+                    for (const rule of rulesToEvaluate) {
                         if (!rule.trigger || !rule.reply) continue;
                         const triggers = rule.trigger.split(',').map(t => t.trim().toLowerCase());
                         if (triggers.includes(incomingText)) {
@@ -815,40 +841,38 @@ function initializeWhatsAppClient() {
         }
 
         // 2. Global Chatbot fallback if no schedule rule matched
-        if (!scheduleAutoReplied) {
-            if (!chatbotConfig.enabled) {
-                debugLog(eventSource, `Global chatbot is DISABLED, skipping rule matching.`);
-                return;
-            }
+        if (!scheduleAutoReplied && chatbotConfig && Array.isArray(chatbotConfig.chatbots)) {
+            // Find global default chatbot or first enabled chatbot
+            const defaultBot = chatbotConfig.chatbots.find(b => b.isDefault && b.enabled !== false) ||
+                               chatbotConfig.chatbots.find(b => b.enabled !== false);
 
-            debugLog(eventSource, `Chatbot ENABLED. Checking ${chatbotConfig.rules.length} global rules against: "${incomingText}"`);
+            if (defaultBot && Array.isArray(defaultBot.rules) && defaultBot.rules.length > 0) {
+                debugLog(eventSource, `Global chatbot "${defaultBot.name}" ENABLED. Checking ${defaultBot.rules.length} rules against: "${incomingText}"`);
 
-            for (const rule of chatbotConfig.rules) {
-                if (!rule.trigger || !rule.reply) continue;
+                for (const rule of defaultBot.rules) {
+                    if (!rule.trigger || !rule.reply) continue;
 
-                const triggers = rule.trigger.split(',').map(t => t.trim().toLowerCase());
-                debugLog(eventSource, `Checking rule: triggers=[${triggers.join(', ')}] against "${incomingText}"`);
+                    const triggers = rule.trigger.split(',').map(t => t.trim().toLowerCase());
+                    if (triggers.includes(incomingText)) {
+                        debugLog(eventSource, `GLOBAL TRIGGER MATCHED "${incomingText}". Replying: "${rule.reply}"`);
 
-                // Strict exact match: the ENTIRE trimmed message must equal the trigger
-                if (triggers.includes(incomingText)) {
-                    debugLog(eventSource, `TRIGGER MATCHED "${incomingText}". Replying: "${rule.reply}"`);
-                    
-                    try {
-                        await msg.reply(rule.reply);
-                        debugLog(eventSource, `Auto-reply sent successfully!`);
+                        try {
+                            await msg.reply(rule.reply);
+                            debugLog(eventSource, `Auto-reply sent successfully!`);
 
-                        io.emit('automation_log', { 
-                            message: `🤖 Auto-replied to ${displayName} (Matched: "${incomingText}") -> "${rule.reply}"`, 
-                            type: 'success' 
-                        });
-                    } catch (err) {
-                        debugLog(eventSource, `FAILED to send auto-reply: ${err.message}`);
-                        io.emit('automation_log', { 
-                            message: `⚠️ Failed to send auto-reply to ${displayName}: ${err.message}`, 
-                            type: 'error' 
-                        });
+                            io.emit('automation_log', { 
+                                message: `🤖 [Chatbot: ${defaultBot.name}] Auto-replied to ${displayName} (Matched: "${incomingText}") -> "${rule.reply}"`, 
+                                type: 'success' 
+                            });
+                        } catch (err) {
+                            debugLog(eventSource, `FAILED to send auto-reply: ${err.message}`);
+                            io.emit('automation_log', { 
+                                message: `⚠️ Failed to send auto-reply to ${displayName}: ${err.message}`, 
+                                type: 'error' 
+                            });
+                        }
+                        break;
                     }
-                    break;
                 }
             }
         }
@@ -1890,19 +1914,30 @@ io.on('connection', (socket) => {
 
     // Save chatbot rules configuration
     socket.on('save_chatbot_rules', (config) => {
-        chatbotConfig = {
-            enabled: config.enabled,
-            rules: config.rules || []
-        };
+        if (config && Array.isArray(config.chatbots)) {
+            chatbotConfig = { chatbots: config.chatbots };
+        } else if (config && config.rules) {
+            chatbotConfig = {
+                chatbots: [
+                    {
+                        id: 'bot-default',
+                        name: 'Default Chatbot',
+                        enabled: config.enabled !== undefined ? config.enabled : true,
+                        isDefault: true,
+                        rules: config.rules || []
+                    }
+                ]
+            };
+        }
 
         try {
             fs.writeFileSync(CHATBOT_FILE, JSON.stringify(chatbotConfig, null, 2));
-            console.log('Saved chatbot rules configuration.');
+            console.log('Saved chatbot configuration.');
             io.emit('chatbot_update', chatbotConfig);
-            socket.emit('automation_log', { message: 'Chatbot auto-reply rules saved successfully!', type: 'success' });
+            socket.emit('automation_log', { message: 'Chatbot configuration saved successfully!', type: 'success' });
         } catch (err) {
             console.error('Failed to write chatbot_rules.json:', err.message);
-            socket.emit('automation_log', { message: `Failed to save chatbot rules: ${err.message}`, type: 'error' });
+            socket.emit('automation_log', { message: `Failed to save chatbot configuration: ${err.message}`, type: 'error' });
         }
     });
 

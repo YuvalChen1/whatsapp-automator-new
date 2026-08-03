@@ -159,58 +159,29 @@
                         </div>
                     </div>
 
-                    <!-- Tab Content: Chatbot -->
+                    <!-- Tab Content: Chatbot Manager -->
                     <div class="tab-content" id="tab-chatbot">
-                        <div class="schedule-status-banner" id="chatbot-banner">
-                            <i class="fas fa-robot"></i>
-                            <span id="chatbot-banner-text">Chatbot Status: Active</span>
-                        </div>
-
-                        <p class="field-desc" style="margin-top: 1rem;">Define automated auto-responses when people reply to your messages. Multiple triggers can be separated by commas (e.g. <code>1, fine, good</code>).</p>
-                        
-                        <div id="rules-container" style="display: flex; flex-direction: column; gap: 1rem; margin-bottom: 1.5rem;">
-                            <!-- Rules get dynamically generated here -->
-                        </div>
-
-                        <div class="options-grid">
-                            <button class="btn btn-block" id="btn-add-rule" style="background: rgba(255,255,255,0.05); border: 1px dashed var(--border-color); color: var(--text-primary);">
-                                <i class="fas fa-plus"></i> Add Reply Rule
-                            </button>
-                            <button class="btn btn-block" id="btn-toggle-chatbot" style="background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); color: var(--text-secondary);">
-                                Disable Chatbot
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+                            <div>
+                                <h3 style="font-size: 1.1rem; color: var(--text-primary); margin: 0; font-family: var(--font-heading);" data-i18n="chatbotManagerTitle">Chatbot Messengers</h3>
+                                <p style="font-size: 0.8rem; color: var(--text-secondary); margin: 0; margin-top: 0.25rem;" data-i18n="chatbotManagerDesc">Create named chatbots and assign them to schedules or set as global default</p>
+                            </div>
+                            <button class="btn btn-primary btn-sm" onclick="openChatbotModal()" style="display: flex; align-items: center; gap: 0.5rem; padding: 0.6rem 1.2rem; font-size: 0.85rem; border-radius: 8px;" data-i18n="createChatbotBtn">
+                                <i class="fas fa-plus"></i> Create Chatbot
                             </button>
                         </div>
 
-                        <button class="btn btn-primary btn-block" id="btn-save-chatbot" style="margin-top: 1rem;">
-                            <i class="fas fa-save"></i> Save Auto-Reply Rules
-                        </button>
-                    </div>
-
-                    <!-- Tab Content: Chatbot -->
-                    <div class="tab-content" id="tab-chatbot">
-                        <div class="schedule-status-banner" id="chatbot-banner">
-                            <i class="fas fa-robot"></i>
-                            <span id="chatbot-banner-text" data-i18n="chatbotBannerActive">Chatbot Status: Active</span>
+                        <!-- Chatbots List Container -->
+                        <div id="chatbots-container" class="schedules-grid">
+                            <!-- Dynamic chatbot cards will be rendered here -->
                         </div>
 
-                        <p class="field-desc" style="margin-top: 1rem;" data-i18n="chatbotDesc">Define automated auto-responses when people reply to your messages. Multiple triggers can be separated by commas (e.g. <code>1, fine, good</code>).</p>
-                        
-                        <div id="rules-container" style="display: flex; flex-direction: column; gap: 1rem; margin-bottom: 1.5rem;">
-                            <!-- Rules get dynamically generated here -->
+                        <div id="chatbots-empty" class="groups-empty-state" style="display: none; flex-direction: column; align-items: center; padding: 3rem 1.5rem; background: rgba(255,255,255,0.01); border: 1px dashed var(--border-color); border-radius: 12px; margin-top: 1rem; text-align: center;">
+                            <i class="fas fa-robot" style="font-size: 2.5rem; color: var(--text-secondary); margin-bottom: 1rem;"></i>
+                            <h4 style="font-size: 0.95rem; color: var(--text-primary); margin: 0; font-weight: 600;" data-i18n="noChatbotTitle">No Chatbots Created</h4>
+                            <p style="font-size: 0.8rem; color: var(--text-secondary); margin: 0.5rem 0 1.25rem 0; max-width: 250px;" data-i18n="noChatbotDesc">Build custom chatbots with auto-reply rules to assign to your scheduled events.</p>
+                            <button class="btn btn-secondary btn-sm" onclick="openChatbotModal()" data-i18n="createChatbotBtn">Create Chatbot</button>
                         </div>
-
-                        <div class="options-grid">
-                            <button class="btn btn-block" id="btn-add-rule" style="background: rgba(255,255,255,0.05); border: 1px dashed var(--border-color); color: var(--text-primary);" data-i18n="addReplyRuleBtn">
-                                <i class="fas fa-plus"></i> Add Reply Rule
-                            </button>
-                            <button class="btn btn-block" id="btn-toggle-chatbot" style="background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); color: var(--text-secondary);" data-i18n="disableChatbotBtn">
-                                Disable Chatbot
-                            </button>
-                        </div>
-
-                        <button class="btn btn-primary btn-block" id="btn-save-chatbot" style="margin-top: 1rem;" data-i18n="saveChatbotRulesBtn">
-                            <i class="fas fa-save"></i> Save Auto-Reply Rules
-                        </button>
                     </div>
 
                     <!-- Tab Content: Reports -->
@@ -543,7 +514,30 @@
                 targetsCountPlural: 'Targets',
                 chatbotOff: 'Chatbot: Off',
                 chatbotRulesCount: 'Chatbot: {count} rule',
-                chatbotRulesCountPlural: 'Chatbot: {count} rules'
+                chatbotRulesCountPlural: 'Chatbot: {count} rules',
+                chatbotManagerTitle: 'Chatbot Messengers',
+                chatbotManagerDesc: 'Create named chatbots and assign them to schedules or set as global default',
+                createChatbotBtn: 'Create Chatbot',
+                noChatbotTitle: 'No Chatbots Created',
+                noChatbotDesc: 'Build custom chatbots with auto-reply rules to assign to your scheduled events.',
+                createChatbotModalTitle: 'Create Chatbot Messenger',
+                editChatbotModalTitle: 'Edit Chatbot Messenger',
+                chatbotNameLabel: 'Chatbot Name',
+                chatbotNamePlaceholder: 'e.g. Sales Auto-Responder',
+                globalFallbackLabel: 'Global Fallback Chatbot',
+                globalFallbackDesc: "Use when an incoming reply doesn't match any specific schedule.",
+                autoReplyRulesTitle: 'Auto-Reply Rules',
+                ruleTriggerNotice: 'Triggers are exact matching words or numbers (separated by commas).',
+                enableChatbotLabel: 'Enable Chatbot',
+                saveChatbotBtn: 'Save Chatbot',
+                selectChatbotModeLabel: 'Chatbot Source',
+                modeExisting: 'Use Existing Chatbot',
+                modeCustom: 'Custom Rules for this Schedule',
+                modeOff: 'Disabled / Off',
+                chooseChatbotLabel: 'Select Chatbot',
+                globalDefaultBadge: 'Global Default',
+                rulesCountBadge: '{count} Rule',
+                rulesCountBadgePlural: '{count} Rules'
             },
             he: {
                 langName: 'English',
@@ -651,7 +645,30 @@
                 targetsCountPlural: 'יעדים',
                 chatbotOff: "צ'אטבוט: מבוטל",
                 chatbotRulesCount: "צ'אטבוט: חוק {count}",
-                chatbotRulesCountPlural: "צ'אטבוט: {count} חוקים"
+                chatbotRulesCountPlural: "צ'אטבוט: {count} חוקים",
+                chatbotManagerTitle: "משיבי צ'אטבוט",
+                chatbotManagerDesc: "צור צ'אטבוטים בעלי שם ושייך אותם לתזמונים או הגדר כברירת מחדל",
+                createChatbotBtn: "צור צ'אטבוט חדש",
+                noChatbotTitle: "טרם נוצרו צ'אטבוטים",
+                noChatbotDesc: "בנה צ'אטבוטים מותאמים אישית עם חוקי מענה לשיוך לתזמונים שלך.",
+                createChatbotModalTitle: "צור משיב צ'אטבוט",
+                editChatbotModalTitle: "ערוך משיב צ'אטבוט",
+                chatbotNameLabel: "שם הצ'אטבוט",
+                chatbotNamePlaceholder: "למשל: מענה אוטומטי למכירות",
+                globalFallbackLabel: "צ'אטבוט ברירת מחדל כללי",
+                globalFallbackDesc: "השתמש כאשר תגובה נכנסת אינה מתאימה לתזמון ספציפי.",
+                autoReplyRulesTitle: "חוקי מענה אוטומטי",
+                ruleTriggerNotice: "טריגרים הם מילים או מספרים בדיוק מושלם (מופרדים בפסיקים).",
+                enableChatbotLabel: "הפעל צ'אטבוט",
+                saveChatbotBtn: "שמור צ'אטבוט",
+                selectChatbotModeLabel: "מקור הצ'אטבוט",
+                modeExisting: "השתמש בצ'אטבוט קיים",
+                modeCustom: "חוקים מותאמים אישית לתזמון זה",
+                modeOff: "מבוטל / כבוי",
+                chooseChatbotLabel: "בחר צ'אטבוט",
+                globalDefaultBadge: "ברירת מחדל",
+                rulesCountBadge: "חוק {count}",
+                rulesCountBadgePlural: "{count} חוקים"
             }
         };
 
@@ -689,8 +706,8 @@
             if (typeof renderSchedules === 'function' && scheduleConfig && scheduleConfig.schedules) {
                 renderSchedules(scheduleConfig.schedules);
             }
-            if (typeof updateChatbotToggleUI === 'function') {
-                updateChatbotToggleUI();
+            if (typeof renderChatbots === 'function' && chatbotConfig && chatbotConfig.chatbots) {
+                renderChatbots(chatbotConfig.chatbots);
             }
             if (typeof renderReportSourceChips === 'function') {
                 renderReportSourceChips();
@@ -740,72 +757,240 @@
             consoleLog.innerHTML = '<div class="log-entry system">Console cleared.</div>';
         });
 
-        // Toggle Chatbot
-        btnToggleChatbot.addEventListener('click', () => {
-            isChatbotActive = !isChatbotActive;
-            updateChatbotToggleUI();
-        });
+        // ============================================================
+        // Multi-Chatbot Manager UI Logic
+        // ============================================================
+        let chatbotConfig = { chatbots: [] };
 
-        function updateChatbotToggleUI() {
+        function renderChatbots(chatbotsList = []) {
+            const container = document.getElementById('chatbots-container');
+            const emptyState = document.getElementById('chatbots-empty');
             const t = i18n[currentLang] || i18n.en;
-            if (isChatbotActive) {
-                btnToggleChatbot.textContent = t.disableChatbotBtn;
-                btnToggleChatbot.style.background = 'rgba(16, 185, 129, 0.1)';
-                btnToggleChatbot.style.color = 'var(--primary)';
-                btnToggleChatbot.style.borderColor = 'rgba(16, 185, 129, 0.3)';
-                chatbotBanner.className = 'schedule-status-banner active';
-                chatbotBannerText.textContent = t.chatbotBannerActive;
+
+            if (!container) return;
+            container.innerHTML = '';
+
+            if (!chatbotsList || chatbotsList.length === 0) {
+                if (emptyState) emptyState.style.display = 'flex';
+                return;
+            }
+
+            if (emptyState) emptyState.style.display = 'none';
+
+            chatbotsList.forEach(bot => {
+                const card = document.createElement('div');
+                card.className = 'schedule-card';
+
+                const rulesCount = (bot.rules && Array.isArray(bot.rules)) ? bot.rules.length : 0;
+                const statusBadgeClass = bot.enabled !== false ? 'badge badge-active' : 'badge badge-inactive';
+                const statusText = bot.enabled !== false ? t.activeStatus : t.disabledStatus;
+                const defaultBadge = bot.isDefault ? `<span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #f59e0b; border: 1px solid rgba(245, 158, 11, 0.3);"><i class="fas fa-star"></i> ${t.globalDefaultBadge}</span>` : '';
+                const rulesText = rulesCount === 1 ? (t.rulesCountBadge ? t.rulesCountBadge.replace('{count}', rulesCount) : `${rulesCount} Rule`) : (t.rulesCountBadgePlural ? t.rulesCountBadgePlural.replace('{count}', rulesCount) : `${rulesCount} Rules`);
+
+                const toggleIcon = bot.enabled !== false ? 'fa-pause' : 'fa-play';
+                const toggleBtnText = bot.enabled !== false ? (currentLang === 'he' ? 'השהה' : 'Pause') : (currentLang === 'he' ? 'הפעל' : 'Start');
+                const editBtnText = currentLang === 'he' ? 'ערוך' : 'Edit';
+                const setDefaultText = currentLang === 'he' ? 'ברירת מחדל' : 'Set Default';
+
+                card.innerHTML = `
+                    <div>
+                        <div class="schedule-card-header" style="display: flex; justify-content: space-between; align-items: center;">
+                            <h4 class="schedule-card-title">${escapeHtml(bot.name || 'Unnamed Bot')}</h4>
+                            <div style="display: flex; gap: 0.35rem; align-items: center;">
+                                ${defaultBadge}
+                                <span class="${statusBadgeClass}">${statusText}</span>
+                            </div>
+                        </div>
+                        <div class="schedule-card-meta" style="margin-top: 0.75rem; display: flex; gap: 1rem; flex-wrap: wrap;">
+                            <span><i class="fas fa-robot" style="color: #10b981;"></i> ${rulesText}</span>
+                        </div>
+                    </div>
+                    <div class="schedule-card-actions" style="margin-top: 1rem;">
+                        <button class="btn btn-secondary btn-sm" onclick="openChatbotModal('${bot.id}')" style="flex: 1; padding: 0.4rem; font-size: 0.8rem;">
+                            <i class="fas fa-edit"></i> ${editBtnText}
+                        </button>
+                        ${!bot.isDefault ? `<button class="btn btn-secondary btn-sm" onclick="setAsGlobalDefaultChatbot('${bot.id}')" style="flex: 1; padding: 0.4rem; font-size: 0.75rem; color: #f59e0b; border-color: rgba(245,158,11,0.3);" title="Set as global fallback bot"><i class="fas fa-star"></i> ${setDefaultText}</button>` : ''}
+                        <button class="btn btn-secondary btn-sm" onclick="toggleChatbotStatus('${bot.id}')" style="flex: 1; padding: 0.4rem; font-size: 0.8rem;">
+                            <i class="fas ${toggleIcon}"></i> ${toggleBtnText}
+                        </button>
+                        <button class="btn btn-secondary btn-sm" onclick="deleteChatbot('${bot.id}')" style="background: rgba(239, 68, 68, 0.1); color: var(--danger); border-color: rgba(239, 68, 68, 0.2); padding: 0.4rem; font-size: 0.8rem;">
+                            <i class="fas fa-trash-alt"></i>
+                        </button>
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+        }
+
+        function openChatbotModal(chatbotId = null) {
+            document.getElementById('chatbot-modal').style.display = 'flex';
+            const rulesContainer = document.getElementById('chatbot-modal-rules-container');
+            if (rulesContainer) rulesContainer.innerHTML = '';
+            const t = i18n[currentLang] || i18n.en;
+
+            if (chatbotId && chatbotConfig && chatbotConfig.chatbots) {
+                const bot = chatbotConfig.chatbots.find(b => b.id === chatbotId);
+                if (bot) {
+                    document.getElementById('chatbot-modal-title').innerHTML = `<i class="fas fa-edit"></i> ${t.editChatbotModalTitle}`;
+                    document.getElementById('edit-chatbot-id').value = bot.id;
+                    document.getElementById('chatbot-name').value = bot.name || '';
+                    document.getElementById('chatbot-modal-default').checked = !!bot.isDefault;
+                    document.getElementById('chatbot-modal-enabled').checked = bot.enabled !== false;
+
+                    if (bot.rules && Array.isArray(bot.rules) && bot.rules.length > 0) {
+                        bot.rules.forEach(r => addChatbotModalRuleRow(r.trigger, r.reply));
+                    } else {
+                        addChatbotModalRuleRow();
+                    }
+                }
             } else {
-                btnToggleChatbot.textContent = t.enableChatbotBtn;
-                btnToggleChatbot.style.background = 'rgba(255, 255, 255, 0.05)';
-                btnToggleChatbot.style.color = 'var(--text-secondary)';
-                btnToggleChatbot.style.borderColor = 'var(--border-color)';
-                chatbotBanner.className = 'schedule-status-banner';
-                chatbotBannerText.textContent = t.chatbotBannerDisabled;
+                document.getElementById('chatbot-modal-title').innerHTML = `<i class="fas fa-robot"></i> ${t.createChatbotModalTitle}`;
+                document.getElementById('edit-chatbot-id').value = '';
+                document.getElementById('chatbot-name').value = '';
+                document.getElementById('chatbot-modal-default').checked = (chatbotConfig.chatbots || []).length === 0;
+                document.getElementById('chatbot-modal-enabled').checked = true;
+                addChatbotModalRuleRow();
             }
         }
 
-        // Add dynamically a new rule card to UI
-        function createRuleElement(triggerVal = '', replyVal = '') {
+        function closeChatbotModal() {
+            document.getElementById('chatbot-modal').style.display = 'none';
+        }
+
+        function addChatbotModalRuleRow(triggerVal = '', replyVal = '') {
+            const container = document.getElementById('chatbot-modal-rules-container');
+            if (!container) return;
+
             const t = i18n[currentLang] || i18n.en;
-            const ruleId = 'rule-' + Math.random().toString(36).substr(2, 9);
+            const ruleId = 'cb-rule-' + Math.random().toString(36).substr(2, 9);
             const card = document.createElement('div');
-            card.className = 'rule-card';
+            card.className = 'chatbot-rule-card';
             card.id = ruleId;
             card.style.display = 'flex';
             card.style.gap = '0.5rem';
             card.style.alignItems = 'center';
             card.innerHTML = `
-                <input type="text" class="rule-trigger" placeholder="${escapeHtml(t.ruleTriggerPlaceholder)}" value="${escapeHtml(triggerVal)}" style="flex: 3; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 8px; padding: 0.65rem; color: var(--text-primary);">
-                <input type="text" class="rule-reply" placeholder="${escapeHtml(t.ruleReplyPlaceholder)}" value="${escapeHtml(replyVal)}" style="flex: 5; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 8px; padding: 0.65rem; color: var(--text-primary);">
-                <button class="btn btn-danger btn-sm" onclick="document.getElementById('${ruleId}').remove()" style="padding: 0.7rem;"><i class="fas fa-trash"></i></button>
+                <input type="text" class="chatbot-rule-trigger" placeholder="${escapeHtml(t.ruleTriggerPlaceholder)}" value="${escapeHtml(triggerVal)}" style="flex: 3; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 8px; padding: 0.5rem 0.75rem; color: var(--text-primary); font-size: 0.85rem; outline: none;">
+                <input type="text" class="chatbot-rule-reply" placeholder="${escapeHtml(t.ruleReplyPlaceholder)}" value="${escapeHtml(replyVal)}" style="flex: 5; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 8px; padding: 0.5rem 0.75rem; color: var(--text-primary); font-size: 0.85rem; outline: none;">
+                <button class="btn btn-danger btn-sm" type="button" onclick="document.getElementById('${ruleId}').remove()" style="padding: 0.5rem 0.75rem;" title="Delete rule"><i class="fas fa-trash"></i></button>
             `;
-            rulesContainer.appendChild(card);
+            container.appendChild(card);
         }
 
-        btnAddRule.addEventListener('click', () => {
-            createRuleElement();
-        });
+        function saveActiveChatbot() {
+            const id = document.getElementById('edit-chatbot-id').value;
+            const name = document.getElementById('chatbot-name').value.trim() || (currentLang === 'he' ? "צ'אטבוט ללא שם" : 'Unnamed Chatbot');
+            const isDefault = document.getElementById('chatbot-modal-default').checked;
+            const enabled = document.getElementById('chatbot-modal-enabled').checked;
 
-        // Save Chatbot rules
-        btnSaveChatbot.addEventListener('click', () => {
-            const cards = rulesContainer.querySelectorAll('.rule-card');
+            const rulesContainer = document.getElementById('chatbot-modal-rules-container');
             const rules = [];
-            cards.forEach(card => {
-                const trigger = card.querySelector('.rule-trigger').value.trim();
-                const reply = card.querySelector('.rule-reply').value.trim();
-                if (trigger && reply) {
-                    rules.push({ trigger, reply });
-                }
-            });
+            if (rulesContainer) {
+                const cards = rulesContainer.querySelectorAll('.chatbot-rule-card');
+                cards.forEach(card => {
+                    const trigger = card.querySelector('.chatbot-rule-trigger').value.trim();
+                    const reply = card.querySelector('.chatbot-rule-reply').value.trim();
+                    if (trigger && reply) {
+                        rules.push({ trigger, reply });
+                    }
+                });
+            }
 
-            const config = {
-                enabled: isChatbotActive,
-                rules: rules
+            const botData = {
+                id: id || 'bot-' + Date.now(),
+                name,
+                isDefault,
+                enabled,
+                rules
             };
 
-            socket.emit('save_chatbot_rules', config);
-        });
+            if (!chatbotConfig.chatbots) chatbotConfig.chatbots = [];
+
+            if (isDefault) {
+                chatbotConfig.chatbots.forEach(b => b.isDefault = false);
+            }
+
+            if (id) {
+                const idx = chatbotConfig.chatbots.findIndex(b => b.id === id);
+                if (idx !== -1) chatbotConfig.chatbots[idx] = botData;
+            } else {
+                chatbotConfig.chatbots.push(botData);
+            }
+
+            if (chatbotConfig.chatbots.length > 0 && !chatbotConfig.chatbots.some(b => b.isDefault)) {
+                chatbotConfig.chatbots[0].isDefault = true;
+            }
+
+            socket.emit('save_chatbot_rules', chatbotConfig);
+            closeChatbotModal();
+        }
+
+        function deleteChatbot(chatbotId) {
+            if (confirm(currentLang === 'he' ? "האם אתה בטוח שברצונך למחוק צ'אטבוט זה?" : 'Are you sure you want to delete this chatbot?')) {
+                chatbotConfig.chatbots = (chatbotConfig.chatbots || []).filter(b => b.id !== chatbotId);
+                if (chatbotConfig.chatbots.length > 0 && !chatbotConfig.chatbots.some(b => b.isDefault)) {
+                    chatbotConfig.chatbots[0].isDefault = true;
+                }
+                socket.emit('save_chatbot_rules', chatbotConfig);
+            }
+        }
+
+        function toggleChatbotStatus(chatbotId) {
+            const bot = (chatbotConfig.chatbots || []).find(b => b.id === chatbotId);
+            if (bot) {
+                bot.enabled = !bot.enabled;
+                socket.emit('save_chatbot_rules', chatbotConfig);
+            }
+        }
+
+        function setAsGlobalDefaultChatbot(chatbotId) {
+            (chatbotConfig.chatbots || []).forEach(b => {
+                b.isDefault = b.id === chatbotId;
+            });
+            socket.emit('save_chatbot_rules', chatbotConfig);
+        }
+
+        function populateScheduleChatbotDropdown() {
+            const select = document.getElementById('schedule-chatbot-id');
+            if (!select) return;
+            select.innerHTML = '';
+
+            const chatbots = chatbotConfig.chatbots || [];
+            if (chatbots.length === 0) {
+                const opt = document.createElement('option');
+                opt.value = '';
+                opt.textContent = currentLang === 'he' ? 'אין צ\'אטבוטים זמינים (צור חדש בכרטיסייה)' : 'No chatbots available (Create one in Chatbot tab)';
+                select.appendChild(opt);
+                return;
+            }
+
+            chatbots.forEach(bot => {
+                const opt = document.createElement('option');
+                opt.value = bot.id;
+                opt.textContent = `${bot.name}${bot.isDefault ? ' (Global Default)' : ''}`;
+                select.appendChild(opt);
+            });
+        }
+
+        function toggleScheduleChatbotMode() {
+            const modeSelect = document.getElementById('schedule-chatbot-mode');
+            if (!modeSelect) return;
+            const mode = modeSelect.value;
+            const existingWrp = document.getElementById('schedule-chatbot-existing-wrapper');
+            const customWrp = document.getElementById('schedule-chatbot-custom-wrapper');
+
+            if (mode === 'existing') {
+                if (existingWrp) existingWrp.style.display = 'block';
+                if (customWrp) customWrp.style.display = 'none';
+                populateScheduleChatbotDropdown();
+            } else if (mode === 'custom') {
+                if (existingWrp) existingWrp.style.display = 'none';
+                if (customWrp) customWrp.style.display = 'block';
+            } else {
+                if (existingWrp) existingWrp.style.display = 'none';
+                if (customWrp) customWrp.style.display = 'none';
+            }
+        }
 
         // Socket Events
         socket.on('connect', () => {
@@ -864,15 +1049,10 @@
 
         // Receive chatbot config updates
         socket.on('chatbot_update', (config) => {
-            isChatbotActive = config.enabled;
-            updateChatbotToggleUI();
-
-            rulesContainer.innerHTML = '';
-            if (config.rules && Array.isArray(config.rules)) {
-                config.rules.forEach(rule => {
-                    createRuleElement(rule.trigger, rule.reply);
-                });
-            }
+            chatbotConfig = config || { chatbots: [] };
+            if (!chatbotConfig.chatbots) chatbotConfig.chatbots = [];
+            renderChatbots(chatbotConfig.chatbots);
+            populateScheduleChatbotDropdown();
         });
 
         // Automation Progress events
@@ -1689,12 +1869,14 @@
             document.getElementById('schedule-modal').style.display = 'flex';
             const rulesContainer = document.getElementById('schedule-chatbot-rules-container');
             if (rulesContainer) rulesContainer.innerHTML = '';
+            populateScheduleChatbotDropdown();
             
             if (scheduleId) {
                 // Edit Mode
                 const schedule = scheduleConfig.schedules.find(s => s.id === scheduleId);
                 if (schedule) {
-                    document.getElementById('schedule-modal-title').innerHTML = `<i class="fas fa-edit"></i> Edit Scheduled Event`;
+                    const t = i18n[currentLang] || i18n.en;
+                    document.getElementById('schedule-modal-title').innerHTML = `<i class="fas fa-edit"></i> ${t.editSchedModalTitle}`;
                     document.getElementById('edit-schedule-id').value = schedule.id;
                     document.getElementById('schedule-name').value = schedule.name || '';
                     document.getElementById('schedule-time').value = schedule.time || '07:00';
@@ -1710,16 +1892,22 @@
                         document.getElementById('schedule-contacts').value = '';
                     }
 
-                    document.getElementById('schedule-chatbot-enabled').checked = schedule.chatbotEnabled !== false;
+                    const mode = schedule.chatbotMode || (schedule.chatbotRules && schedule.chatbotRules.length > 0 ? 'custom' : (schedule.chatbotId ? 'existing' : (schedule.chatbotEnabled !== false ? 'existing' : 'off')));
+                    document.getElementById('schedule-chatbot-mode').value = mode;
+                    if (schedule.chatbotId) {
+                        document.getElementById('schedule-chatbot-id').value = schedule.chatbotId;
+                    }
                     if (schedule.chatbotRules && Array.isArray(schedule.chatbotRules) && schedule.chatbotRules.length > 0) {
                         schedule.chatbotRules.forEach(r => addScheduleRuleRow(r.trigger, r.reply));
                     } else {
                         addScheduleRuleRow();
                     }
+                    toggleScheduleChatbotMode();
                 }
             } else {
                 // Create Mode
-                document.getElementById('schedule-modal-title').innerHTML = `<i class="fas fa-clock"></i> Create Scheduled Event`;
+                const t = i18n[currentLang] || i18n.en;
+                document.getElementById('schedule-modal-title').innerHTML = `<i class="fas fa-clock"></i> ${t.createSchedModalTitle}`;
                 document.getElementById('edit-schedule-id').value = '';
                 document.getElementById('schedule-name').value = '';
                 document.getElementById('schedule-time').value = getIsraelTimeStr();
@@ -1727,8 +1915,9 @@
                 document.getElementById('schedule-enabled').checked = true;
                 document.getElementById('schedule-message').value = '';
                 document.getElementById('schedule-contacts').value = '';
-                document.getElementById('schedule-chatbot-enabled').checked = true;
+                document.getElementById('schedule-chatbot-mode').value = 'existing';
                 addScheduleRuleRow();
+                toggleScheduleChatbotMode();
             }
         }
 
@@ -1757,10 +1946,11 @@
                 }
             });
 
-            const chatbotEnabled = document.getElementById('schedule-chatbot-enabled').checked;
+            const chatbotMode = document.getElementById('schedule-chatbot-mode').value;
+            const chatbotId = document.getElementById('schedule-chatbot-id').value;
             const rulesContainer = document.getElementById('schedule-chatbot-rules-container');
             const chatbotRules = [];
-            if (rulesContainer) {
+            if (chatbotMode === 'custom' && rulesContainer) {
                 const ruleCards = rulesContainer.querySelectorAll('.schedule-rule-card');
                 ruleCards.forEach(card => {
                     const trigger = card.querySelector('.schedule-rule-trigger').value.trim();
@@ -1779,8 +1969,10 @@
                 enabled,
                 message,
                 contacts,
-                chatbotEnabled,
-                chatbotRules
+                chatbotMode,
+                chatbotId: chatbotMode === 'existing' ? chatbotId : null,
+                chatbotEnabled: chatbotMode !== 'off',
+                chatbotRules: chatbotMode === 'custom' ? chatbotRules : []
             };
 
             if (id) {
@@ -2042,26 +2234,38 @@
 
                 <!-- Schedule Chatbot Messenger -->
                 <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-color); border-radius: 8px; padding: 1rem;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
                         <span style="font-weight: 500; font-size: 0.85rem; color: var(--text-primary); display: flex; align-items: center; gap: 0.5rem;">
                             <i class="fas fa-robot" style="color: #10b981;"></i> <span data-i18n="schedChatbotTitle">Schedule Chatbot Messenger</span>
                         </span>
-                        <label class="switch-container">
-                            <input type="checkbox" id="schedule-chatbot-enabled" checked>
-                            <span class="switch-slider"></span>
-                        </label>
-                    </div>
-                    <p style="font-size: 0.75rem; color: var(--text-secondary); margin-bottom: 0.75rem; line-height: 1.3;" data-i18n="schedChatbotDesc">
-                        Set custom auto-reply rules for contacts in this schedule when they reply.
-                    </p>
-
-                    <div id="schedule-chatbot-rules-container" style="display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 0.75rem;">
-                        <!-- Dynamic Schedule Rules -->
                     </div>
 
-                    <button class="btn btn-secondary btn-sm" id="btn-add-schedule-rule" type="button" style="width: 100%; font-size: 0.8rem; padding: 0.5rem;" onclick="addScheduleRuleRow()" data-i18n="addAutoReplyRuleBtn">
-                        <i class="fas fa-plus"></i> Add Auto-Reply Rule
-                    </button>
+                    <div class="form-group" style="margin-bottom: 0.75rem;">
+                        <label style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.35rem; display: block;" data-i18n="selectChatbotModeLabel">Chatbot Source</label>
+                        <select id="schedule-chatbot-mode" onchange="toggleScheduleChatbotMode()" style="width: 100%; padding: 0.65rem; background: rgba(0, 0, 0, 0.3); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-primary); outline: none; font-size: 0.85rem;">
+                            <option value="existing" data-i18n="modeExisting">Use Existing Chatbot</option>
+                            <option value="custom" data-i18n="modeCustom">Custom Rules for this Schedule</option>
+                            <option value="off" data-i18n="modeOff">Disabled / Off</option>
+                        </select>
+                    </div>
+
+                    <!-- Option 1: Existing Chatbot Dropdown -->
+                    <div id="schedule-chatbot-existing-wrapper" style="display: block; margin-bottom: 0.5rem;">
+                        <label style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.35rem; display: block;" data-i18n="chooseChatbotLabel">Select Chatbot</label>
+                        <select id="schedule-chatbot-id" style="width: 100%; padding: 0.65rem; background: rgba(0, 0, 0, 0.3); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-primary); outline: none; font-size: 0.85rem;">
+                            <!-- Populated dynamically -->
+                        </select>
+                    </div>
+
+                    <!-- Option 2: Custom Rules Wrapper -->
+                    <div id="schedule-chatbot-custom-wrapper" style="display: none;">
+                        <div id="schedule-chatbot-rules-container" style="display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 0.75rem;">
+                            <!-- Dynamic Schedule Rules -->
+                        </div>
+                        <button class="btn btn-secondary btn-sm" id="btn-add-schedule-rule" type="button" style="width: 100%; font-size: 0.8rem; padding: 0.5rem;" onclick="addScheduleRuleRow()" data-i18n="addAutoReplyRuleBtn">
+                            <i class="fas fa-plus"></i> Add Auto-Reply Rule
+                        </button>
+                    </div>
                 </div>
 
                 <!-- Enabled Toggle -->
@@ -2080,6 +2284,77 @@
                 <button class="btn btn-secondary btn-sm" onclick="closeScheduleModal()" data-i18n="cancelBtn">Cancel</button>
                 <button class="btn btn-primary btn-sm" onclick="saveActiveSchedule()" data-i18n="saveSchedBtn">
                     <i class="fas fa-save"></i> Save Schedule
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Chatbot Editor Modal -->
+    <div id="chatbot-modal" class="modal-overlay">
+        <div class="modal-content" style="max-width: 550px;">
+            <div class="modal-header">
+                <h3 id="chatbot-modal-title"><i class="fas fa-robot"></i> <span data-i18n="createChatbotModalTitle">Create Chatbot Messenger</span></h3>
+                <button class="modal-close" onclick="closeChatbotModal()">&times;</button>
+            </div>
+            <div class="modal-body" style="gap: 1.25rem;">
+                <input type="hidden" id="edit-chatbot-id">
+
+                <!-- Chatbot Name -->
+                <div class="form-group">
+                    <label for="chatbot-name" style="font-weight: 500; margin-bottom: 0.5rem; display: block; font-size: 0.85rem; color: var(--text-primary);" data-i18n="chatbotNameLabel">Chatbot Name</label>
+                    <input type="text" id="chatbot-name" data-i18n-placeholder="chatbotNamePlaceholder" placeholder="e.g. Sales Auto-Responder" style="width: 100%; padding: 0.75rem 1rem; background: rgba(0, 0, 0, 0.3); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-primary); outline: none;">
+                </div>
+
+                <!-- Global Default Checkbox -->
+                <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); padding: 0.75rem 1rem; border-radius: 8px;">
+                    <div>
+                        <span style="font-weight: 500; font-size: 0.85rem; color: var(--text-primary); display: flex; align-items: center; gap: 0.5rem;">
+                            <i class="fas fa-star" style="color: #f59e0b;"></i> <span data-i18n="globalFallbackLabel">Global Fallback Chatbot</span>
+                        </span>
+                        <p style="font-size: 0.75rem; color: var(--text-secondary); margin: 0.25rem 0 0 0;" data-i18n="globalFallbackDesc">Use when an incoming reply doesn't match any specific schedule.</p>
+                    </div>
+                    <label class="switch-container">
+                        <input type="checkbox" id="chatbot-modal-default">
+                        <span class="switch-slider"></span>
+                    </label>
+                </div>
+
+                <!-- Auto Reply Rules -->
+                <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-color); border-radius: 8px; padding: 1rem;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                        <span style="font-weight: 500; font-size: 0.85rem; color: var(--text-primary); display: flex; align-items: center; gap: 0.5rem;" data-i18n="autoReplyRulesTitle">
+                            <i class="fas fa-list" style="color: #10b981;"></i> Auto-Reply Rules
+                        </span>
+                    </div>
+                    <p style="font-size: 0.75rem; color: var(--text-secondary); margin-bottom: 0.75rem; line-height: 1.3;" data-i18n="ruleTriggerNotice">
+                        Triggers are exact matching words or numbers (separated by commas).
+                    </p>
+
+                    <div id="chatbot-modal-rules-container" style="display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 0.75rem;">
+                        <!-- Dynamic rules -->
+                    </div>
+
+                    <button class="btn btn-secondary btn-sm" id="btn-add-chatbot-modal-rule" type="button" style="width: 100%; font-size: 0.8rem; padding: 0.5rem;" onclick="addChatbotModalRuleRow()" data-i18n="addAutoReplyRuleBtn">
+                        <i class="fas fa-plus"></i> Add Auto-Reply Rule
+                    </button>
+                </div>
+
+                <!-- Enabled Toggle -->
+                <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); padding: 0.75rem 1rem; border-radius: 8px;">
+                    <span style="font-weight: 500; font-size: 0.9rem; color: var(--text-primary); display: flex; align-items: center; gap: 0.5rem;">
+                        <i class="fas fa-power-off" style="color: var(--primary);"></i> <span data-i18n="enableChatbotLabel">Enable Chatbot</span>
+                    </span>
+                    <label class="switch-container">
+                        <input type="checkbox" id="chatbot-modal-enabled" checked>
+                        <span class="switch-slider"></span>
+                    </label>
+                </div>
+            </div>
+            <!-- Modal Footer -->
+            <div class="modal-footer">
+                <button class="btn btn-secondary btn-sm" onclick="closeChatbotModal()" data-i18n="cancelBtn">Cancel</button>
+                <button class="btn btn-primary btn-sm" onclick="saveActiveChatbot()" data-i18n="saveChatbotBtn">
+                    <i class="fas fa-save"></i> Save Chatbot
                 </button>
             </div>
         </div>
