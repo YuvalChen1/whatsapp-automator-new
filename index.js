@@ -802,6 +802,7 @@ function initializeWhatsAppClient() {
 
                 const schContacts = sch.contacts || [];
                 const isContactInSchedule = schContacts.some(c => {
+                    if (c.paused) return false;
                     const cRaw = (c.phone || '').split('|')[0].trim();
                     const cPhone = cRaw.split('@')[0];
                     const rPhone = resolvedFrom.split('@')[0];
@@ -1841,7 +1842,12 @@ function applySchedule() {
             io.emit('automation_log', { message: `⏰ Scheduled automation "${schedule.name || 'Unnamed'}" triggered!`, type: 'system' });
             
             if (schedule.contacts && schedule.contacts.length > 0) {
-                runAutomation(schedule.contacts, schedule.message, 6, 12, true);
+                const activeContacts = schedule.contacts.filter(c => !c.paused);
+                if (activeContacts.length > 0) {
+                    runAutomation(activeContacts, schedule.message, 6, 12, true);
+                } else {
+                    io.emit('automation_log', { message: `⏰ Schedule "${schedule.name || 'Unnamed'}" triggered, but all contacts are currently paused!`, type: 'system' });
+                }
             } else {
                 io.emit('automation_log', { message: `Schedule "${schedule.name || 'Unnamed'}" triggered, but contacts list is empty!`, type: 'error' });
             }
