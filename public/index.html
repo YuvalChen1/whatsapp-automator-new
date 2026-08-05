@@ -289,40 +289,16 @@
 
                             </div>
 
-                            <!-- Right Column: Sources & Recent Replies Feed -->
-                            <div style="display: flex; flex-direction: column; gap: 1rem;">
+                            <!-- Right Column: Recent Replies Feed -->
+                            <div style="display: flex; flex-direction: column;">
                                 
-                                <!-- Card 3: Report Source Chats -->
-                                <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-color); border-radius: 12px; padding: 1rem;">
-                                    <h4 style="font-family: var(--font-heading); font-size: 0.9rem; margin: 0 0 0.5rem 0; display: flex; align-items: center; gap: 0.5rem; color: var(--text-primary);">
-                                        <i class="fas fa-filter" style="color: #10b981;"></i>
-                                        <span data-i18n="reportSourceTitle">Report Source Chats</span>
-                                    </h4>
-                                    <p style="font-size: 0.75rem; color: var(--text-secondary); margin-bottom: 0.75rem;" data-i18n="reportSourceDesc">Only log replies from these specific contacts/groups.</p>
-
-                                    <div style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
-                                        <button class="btn btn-secondary btn-sm" id="btn-report-add-contact" style="flex:1; font-size:0.78rem; padding: 0.45rem;" data-i18n="addContactBtn">
-                                            <i class="fas fa-user-plus"></i> Add Contact
-                                        </button>
-                                        <button class="btn btn-secondary btn-sm" id="btn-report-add-group" style="flex:1; font-size:0.78rem; padding: 0.45rem;" data-i18n="addGroupBtn">
-                                            <i class="fas fa-users"></i> Add Group
-                                        </button>
-                                    </div>
-
-                                    <div id="report-sources-chips" style="display: flex; flex-wrap: wrap; gap: 0.4rem; max-height: 80px; overflow-y: auto; margin-bottom: 0.75rem; padding: 0.35rem 0;"></div>
-
-                                    <button class="btn btn-primary btn-sm btn-block" id="btn-save-report-sources" style="padding: 0.45rem; font-size: 0.8rem;" data-i18n="saveReportSourcesBtn">
-                                        <i class="fas fa-save"></i> Save Sources
-                                    </button>
-                                </div>
-
-                                <!-- Card 4: Recent Replies Live Feed -->
-                                <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-color); border-radius: 12px; padding: 1rem;">
+                                <!-- Card: Recent Replies Live Feed -->
+                                <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-color); border-radius: 12px; padding: 1rem; flex: 1; display: flex; flex-direction: column;">
                                     <h4 style="font-family: var(--font-heading); font-size: 0.9rem; margin: 0 0 0.75rem 0; display: flex; align-items: center; gap: 0.5rem; color: var(--text-primary);">
                                         <i class="fas fa-clock-rotate-left" style="color: #10b981;"></i>
                                         <span data-i18n="recentRepliesTitle">Recent Replies</span>
                                     </h4>
-                                    <div class="recent-replies-list" id="recent-replies" style="max-height: 180px; overflow-y: auto;">
+                                    <div class="recent-replies-list" id="recent-replies" style="max-height: 340px; overflow-y: auto; flex: 1;">
                                         <div class="no-replies-placeholder">
                                             <i class="fas fa-inbox"></i>
                                             <p data-i18n="noRepliesPlaceholder">No replies recorded yet. Incoming messages will appear here in real-time.</p>
@@ -1286,7 +1262,6 @@
         const gatheringEndInput = document.getElementById('gathering-end-time');
         const btnSaveGathering = document.getElementById('btn-save-gathering-settings');
         let recentRepliesList = [];
-        let reportSources = []; // array of { id, name, type }
 
         // === Israel Timezone Helpers ===
         function getIsraelTimeParts() {
@@ -1319,28 +1294,6 @@
             });
         }
 
-        // === Report Sources chip rendering ===
-        function renderReportSourceChips() {
-            const container = document.getElementById('report-sources-chips');
-            if (!container) return;
-            if (reportSources.length === 0) {
-                container.innerHTML = '<span style="font-size:0.82rem; color: var(--text-secondary); font-style: italic;">No sources selected — gathering from all automation contacts</span>';
-                return;
-            }
-            container.innerHTML = reportSources.map((s, idx) => `
-                <div style="display:inline-flex; align-items:center; gap:0.4rem; background: rgba(18,140,126,0.15); border: 1px solid rgba(18,140,126,0.35); border-radius:20px; padding: 0.3rem 0.75rem; font-size:0.82rem; color: var(--text-primary);">
-                    <i class="fas ${s.type === 'group' ? 'fa-users' : 'fa-user'}" style="color:#10b981; font-size:0.7rem;"></i>
-                    <span>${escapeHtml(s.name)}</span>
-                    <button onclick="removeReportSource(${idx})" style="background:none;border:none;cursor:pointer;color:#ef4444;font-size:0.8rem;padding:0;margin-left:0.2rem;line-height:1;" title="Remove">&times;</button>
-                </div>
-            `).join('');
-        }
-
-        function removeReportSource(idx) {
-            reportSources.splice(idx, 1);
-            renderReportSourceChips();
-        }
-
         // Load and apply saved report settings
         async function loadReportSettings() {
             try {
@@ -1352,8 +1305,6 @@
                 }
                 if (gatheringStartInput) gatheringStartInput.value = data.startTime || getIsraelTimeStr();
                 if (gatheringEndInput)   gatheringEndInput.value   = data.endTime   || getIsraelTimeStr();
-                reportSources = Array.isArray(data.reportSources) ? data.reportSources : [];
-                renderReportSourceChips();
             } catch (err) {
                 console.error('Failed to load report settings:', err);
             }
@@ -1367,8 +1318,7 @@
                     const payload = {
                         limitGathering: gatheringToggle.checked,
                         startTime: gatheringStartInput.value,
-                        endTime: gatheringEndInput.value,
-                        reportSources
+                        endTime: gatheringEndInput.value
                     };
                     const res = await fetch('/api/report-settings', {
                         method: 'POST',
@@ -1390,9 +1340,6 @@
             });
         }
 
-        // Save report sources
-        const btnSaveReportSources = document.getElementById('btn-save-report-sources');
-        if (btnSaveReportSources) {
             btnSaveReportSources.addEventListener('click', async () => {
                 btnSaveReportSources.disabled = true;
                 try {

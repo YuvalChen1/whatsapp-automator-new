@@ -711,29 +711,6 @@ function initializeWhatsAppClient() {
             }
         }
 
-        // === REPORT SOURCES FILTER ===
-        if (reportSettings && Array.isArray(reportSettings.reportSources) && reportSettings.reportSources.length > 0) {
-            const sourceIds = reportSettings.reportSources.map(s => s.id);
-            // Also compare by bare phone number (strip @c.us / @g.us / @lid) to handle JID format differences
-            const sourcePhones = sourceIds.map(id => id.split('@')[0]);
-            const resolvedPhone = resolvedFrom.split('@')[0];
-            const senderPhone  = sender.split('@')[0];
-            const fromPhone    = msg.from.split('@')[0];
-
-            const matchesSource =
-                sourceIds.includes(resolvedFrom) ||
-                sourceIds.includes(msg.from) ||
-                sourceIds.includes(sender) ||
-                sourcePhones.includes(resolvedPhone) ||
-                sourcePhones.includes(senderPhone) ||
-                sourcePhones.includes(fromPhone);
-
-            if (!matchesSource) {
-                debugLog(eventSource, `SKIPPED - ${resolvedFrom} (phone: ${resolvedPhone}) is NOT in report sources list.`);
-                return;
-            }
-        }
-
         debugLog(eventSource, `MATCH FOUND - Processing message from ${resolvedFrom} (original: ${msg.from})`);
 
         const phone = sender.split('@')[0];
@@ -1538,12 +1515,12 @@ app.get('/api/report-settings', (req, res) => {
 // API route: save report settings
 app.post('/api/report-settings', (req, res) => {
     try {
-        const { limitGathering, startTime, endTime, reportSources } = req.body;
+        const { limitGathering, startTime, endTime } = req.body;
         reportSettings = {
             limitGathering: !!limitGathering,
             startTime: startTime || '07:00',
             endTime: endTime || '12:00',
-            reportSources: Array.isArray(reportSources) ? reportSources : []
+            reportSources: []
         };
         fs.writeFileSync(REPORT_SETTINGS_FILE, JSON.stringify(reportSettings, null, 2));
         console.log('Report settings saved:', reportSettings);
