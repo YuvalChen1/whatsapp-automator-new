@@ -104,6 +104,387 @@ let activeAutomation = null; // Stores running automation state
 let shouldStopAutomation = false;
 let activeCronJobs = new Map();
 
+// === IN-MEMORY DEBUG LOG (viewable from browser via /api/debug-log) ===
+const debugLogEntries = [];
+const MAX_DEBUG_ENTRIES = 200;
+function debugLog(tag, message) {
+    const entry = `[${new Date().toISOString()}] [${tag}] ${message}`;
+    console.log(entry);
+    debugLogEntries.push(entry);
+    if (debugLogEntries.length > MAX_DEBUG_ENTRIES) debugLogEntries.shift();
+    io.emit('debug_log', entry);
+}
+
+// Track processed message IDs to avoid duplicate processing from dual event listeners
+const processedMessageIds = new Set();
+const MAX_PROCESSED_IDS = 1000;
+function markProcessed(id) {
+    processedMessageIds.add(id);
+    if (processedMessageIds.size > MAX_PROCESSED_IDS) {
+        const first = processedMessageIds.values().next().value;
+        processedMessageIds.delete(first);
+    }
+}
+
+// === LID-TO-PHONE MAPPING ===
+const LID_MAP_FILE = path.join(DATA_DIR, 'lid_map.json');
+let lidToPhone = {};  // { "73933600633038@lid": "972506798676@c.us", ... }
+let phoneToLid = {};  // reverse map
+
+if (fs.existsSync(LID_MAP_FILE)) {
+    try {
+        lidToPhone = JSON.parse(fs.readFileSync(LID_MAP_FILE, 'utf8'));
+        for (const [lid, phone] of Object.entries(lidToPhone)) {
+            phoneToLid[phone] = lid;
+        }
+        console.log(`Loaded LID map with ${Object.keys(lidToPhone).length} entries.`);
+    } catch (e) {
+        console.error('Error reading lid_map.json:', e.message);
+    }
+}
+
+function saveLidMap() {
+    try {
+        fs.writeFileSync(LID_MAP_FILE, JSON.stringify(lidToPhone, null, 2));
+    } catch (err) {
+        console.error('Failed to save lid_map.json:', err.message);
+    }
+}
+
+function registerLidMapping(lid, phoneJid) {
+    if (!lid || !phoneJid) return;
+    if (lidToPhone[lid] === phoneJid) return;
+    lidToPhone[lid] = phoneJid;
+    phoneToLid[phoneJid] = lid;
+    saveLidMap();
+    debugLog('LID_MAP', `Mapped ${lid} <-> ${phoneJid}`);
+}
+
+function resolveToPhone(jid) {
+    if (!jid) return jid;
+    if (jid.endsWith('@c.us') || jid.endsWith('@g.us')) return jid;
+    if (jid.endsWith('@lid') && lidToPhone[jid]) {
+        return lidToPhone[jid];
+    }
+    return jid;
+}
+
+// Schedule Configuration state
+let scheduleConfig = {
+    enabled: true,
+    schedules: []
+};
+
+// Chatbot Configuration state
+let chatbotConfig = {
+    chatbots: []
+};
+
+// Replies tracking data: { "YYYY-MM": { "DD": [ { phone, message, time } ] } }
+let repliesData = {};
+
+// Load existing configs
+if (DATA_DIR !== __dirname) {
+    if (!fs.existsSync(DATA_DIR)) {
+        try {
+            fs.mkdirSync(DATA_DIR, { recursive: true });
+        } catch (err) {
+            console.error('Failed to create DATA_DIR:', err.message);
+        }
+    }
+    const filesToCopy = ['schedule.json', 'chatbot_rules.json'];
+    filesToCopy.forEach(file => {
+        const targetPath = path.join(DATA_DIR, file);
+        const sourcePath = path.join(__dirname, file);
+        if (!fs.existsSync(targetPath) && fs.existsSync(sourcePath)) {
+            try {
+                fs.copyFileSync(sourcePath, targetPath);
+                console.log(`Initialized persistent volume file: ${file}`);
+            } catch (err) {
+                console.error(`Failed to copy ${file} to persistent disk:`, err.message);
+            }
+        }
+    });
+}
+
+if (fs.existsSync(SCHEDULE_FILE)) {
+    try {
+        const raw = fs.readFileSync(SCHEDULE_FILE, 'utf8');
+        scheduleConfig = JSON.parse(raw);
+        if (!scheduleConfig.schedules) {
+            scheduleConfig.schedules = [];
+            if (scheduleConfig.time || scheduleConfig.contacts) {
+                scheduleConfig.schedules.push({
+                    id: 'default-' + Date.now(),
+                    name: 'Default Schedule',
+                    enabled: scheduleConfig.enabled !== undefined ? scheduleConfig.enabled : true,
+                    time: scheduleConfig.time || '07:00',
+                    timezone: scheduleConfig.timezone || 'UTC',
+                    contacts: scheduleConfig.contacts || [],
+                    message: scheduleConfig.message || ''
+                });
+            }
+            scheduleConfig.enabled = true;
+        }
+        console.log(`Loaded schedule configuration: ${scheduleConfig.schedules.length} schedules registered.`);
+    } catch (e) {
+        console.error('Error reading schedule.json:', e.message);
+    }
+}
+
+if (fs.existsSync(CHATBOT_FILE)) {
+    try {
+        const raw = fs.readFileSync(CHATBOT_FILE, 'utf8');
+        const parsed = JSON.parse(raw);
+        if (parsed.chatbots && Array.isArray(parsed.chatbots)) {
+            chatbotConfig = parsed;
+        } else {
+            chatbotConfig = {
+                chatbots: [
+                    {
+                        id: 'bot-default',
+                        name: 'Default Chatbot',
+                        enabled: parsed.enabled !== undefined ? parsed.enabled : true,
+                        isDefault: true,
+                        rules: parsed.rules || []
+                    }
+                ]
+            };
+        }
+        console.log(`Loaded chatbot configuration: ${chatbotConfig.chatbots.length} chatbots registered.`);
+    } catch (e) {
+        console.error('Error reading chatbot_rules.json:', e.message);
+    }
+}
+
+if (fs.existsSync(REPLIES_FILE)) {
+    try {
+        const raw = fs.readFileSync(REPLIES_FILE, 'utf8');
+        repliesData = JSON.parse(raw);
+        console.log('Loaded replies tracking data.');
+    } catch (e) {
+        console.error('Error reading replies.json:', e.message);
+    }
+}
+
+let reportSettings = {
+    limitGathering: false,
+    startTime: '07:00',
+    endTime: '12:00',
+    reportSources: []
+};
+
+if (fs.existsSync(REPORT_SETTINGS_FILE)) {
+    try {
+        const raw = fs.readFileSync(REPORT_SETTINGS_FILE, 'utf8');
+        reportSettings = JSON.parse(raw);
+        console.log('Loaded report settings:', reportSettings);
+    } catch (e) {
+        console.error('Error reading report_settings.json:', e.message);
+    }
+}
+
+// === TARGETED CONTACTS TRACKING ===
+let targetedContacts = new Set();
+
+if (fs.existsSync(TARGETED_CONTACTS_FILE)) {
+    try {
+        const raw = fs.readFileSync(TARGETED_CONTACTS_FILE, 'utf8');
+        const parsed = JSON.parse(raw);
+        targetedContacts = new Set(parsed);
+        console.log(`Loaded ${targetedContacts.size} targeted contacts.`);
+    } catch (e) {
+        console.error('Error reading targeted_contacts.json:', e.message);
+    }
+}
+
+function recordTargetedContact(id) {
+    console.log(`[recordTargetedContact] Called with id: ${id}, already tracked: ${targetedContacts.has(id)}, current set size: ${targetedContacts.size}`);
+    if (!targetedContacts.has(id)) {
+        targetedContacts.add(id);
+        try {
+            fs.writeFileSync(TARGETED_CONTACTS_FILE, JSON.stringify(Array.from(targetedContacts), null, 2));
+            console.log(`[recordTargetedContact] SUCCESS - Recorded new targeted contact: ${id}. Total tracked: ${targetedContacts.size}`);
+        } catch (err) {
+            console.error('[recordTargetedContact] FAILED to write targeted_contacts.json:', err.message);
+        }
+        io.emit('targeted_update', { count: targetedContacts.size, contacts: Array.from(targetedContacts) });
+    }
+}
+
+function updateTargetedFromSchedule() {
+    if (scheduleConfig && scheduleConfig.schedules) {
+        scheduleConfig.schedules.forEach(schedule => {
+            if (!schedule.enabled) return;
+            if (schedule.contacts) {
+                schedule.contacts.forEach(c => {
+                    const rawPhone = c.phone.toString().trim();
+                    let whatsappId;
+                    if (rawPhone.endsWith('@g.us')) {
+                        whatsappId = rawPhone;
+                    } else if (rawPhone.endsWith('@c.us') || rawPhone.endsWith('@lid')) {
+                        whatsappId = rawPhone;
+                    } else {
+                        const cleanPhone = rawPhone.replace(/[^0-9]/g, '');
+                        whatsappId = `${cleanPhone}@c.us`;
+                    }
+                    recordTargetedContact(whatsappId);
+                });
+            }
+        });
+    }
+}
+
+function isTargeted(jid) {
+    if (!jid) return false;
+    if (targetedContacts.has(jid)) return true;
+    if (jid.endsWith('@c.us')) {
+        const cleanIncoming = jid.split('@')[0].replace(/[^0-9]/g, '');
+        if (cleanIncoming.length >= 7) {
+            for (const target of targetedContacts) {
+                if (target.endsWith('@c.us')) {
+                    const cleanTarget = target.split('@')[0].replace(/[^0-9]/g, '');
+                    if (cleanTarget.length >= 7) {
+                        const tailIncoming = cleanIncoming.slice(-7);
+                        const tailTarget = cleanTarget.slice(-7);
+                        if (tailIncoming === tailTarget) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return false;
+}
+
+function logReply(phone, name, messageText) {
+    const now = new Date();
+    let yearStr, monthStr, dayKey, timeStr;
+    try {
+        const formatter = new Intl.DateTimeFormat('en-GB', {
+            timeZone: 'Asia/Jerusalem',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false
+        });
+        const parts = formatter.formatToParts(now);
+        const dateObj = {};
+        parts.forEach(p => { dateObj[p.type] = p.value; });
+        yearStr = dateObj.year;
+        monthStr = dateObj.month;
+        dayKey = dateObj.day;
+        timeStr = `${dateObj.hour}:${dateObj.minute}`;
+    } catch (err) {
+        console.error('Failed to format date in Israel timezone:', err.message);
+        yearStr = String(now.getUTCFullYear());
+        monthStr = String(now.getUTCMonth() + 1).padStart(2, '0');
+        dayKey = String(now.getUTCDate()).padStart(2, '0');
+        timeStr = now.toLocaleTimeString('en-GB', { timeZone: 'UTC', hour: '2-digit', minute: '2-digit' });
+    }
+    const monthKey = `${yearStr}-${monthStr}`;
+    if (!repliesData[monthKey]) repliesData[monthKey] = {};
+    if (!repliesData[monthKey][dayKey]) repliesData[monthKey][dayKey] = [];
+    repliesData[monthKey][dayKey].push({
+        phone,
+        name,
+        message: messageText,
+        time: timeStr
+    });
+    try {
+        fs.writeFileSync(REPLIES_FILE, JSON.stringify(repliesData, null, 2));
+    } catch (err) {
+        console.error('Failed to save replies.json:', err.message);
+    }
+    io.emit('new_reply', { phone, name, message: messageText, time: timeStr, day: dayKey, month: monthKey });
+}
+
+function copyDirSync(src, dest) {
+    fs.mkdirSync(dest, { recursive: true });
+    const entries = fs.readdirSync(src, { withFileTypes: true });
+    for (const entry of entries) {
+        const srcPath = path.join(src, entry.name);
+        const destPath = path.join(dest, entry.name);
+        if (['SingletonLock', 'SingletonCookie', 'SingletonSocket'].includes(entry.name)) {
+            continue;
+        }
+        try {
+            if (entry.isDirectory()) {
+                copyDirSync(srcPath, destPath);
+            } else {
+                fs.copyFileSync(srcPath, destPath);
+            }
+        } catch (err) {
+            if (err.code !== 'ENOENT') {
+                console.warn(`  Skipping ${srcPath}: ${err.message}`);
+            }
+        }
+    }
+}
+
+function restoreSessionFromBackup() {
+    if (fs.existsSync(PERSISTENT_SESSION_DIR)) {
+        console.log(`Restoring session from persistent backup: ${PERSISTENT_SESSION_DIR}`);
+        try {
+            copyDirSync(PERSISTENT_SESSION_DIR, LOCAL_SESSION_DIR);
+            console.log(`Session restored to: ${LOCAL_SESSION_DIR}`);
+        } catch (err) {
+            console.error('Failed to restore session backup:', err.message);
+        }
+    } else {
+        console.log('No session backup found on persistent disk. Will need QR scan.');
+    }
+}
+
+function backupSessionToPersistent() {
+    if (fs.existsSync(LOCAL_SESSION_DIR)) {
+        console.log(`Backing up session to persistent disk: ${PERSISTENT_SESSION_DIR}`);
+        try {
+            if (fs.existsSync(PERSISTENT_SESSION_DIR)) {
+                fs.rmSync(PERSISTENT_SESSION_DIR, { recursive: true, force: true });
+            }
+            copyDirSync(LOCAL_SESSION_DIR, PERSISTENT_SESSION_DIR);
+            console.log('Session backup complete.');
+        } catch (err) {
+            console.error('Failed to backup session:', err.message);
+        }
+    }
+}
+
+console.log('--- Session Setup ---');
+fs.mkdirSync(LOCAL_AUTH_DIR, { recursive: true });
+restoreSessionFromBackup();
+
+let client = null;
+
+async function gracefulShutdown(signal) {
+    console.log(`Received ${signal}. Shutting down gracefully...`);
+    backupSessionToPersistent();
+    try {
+        if (client) {
+            console.log('Destroying WhatsApp client...');
+            await client.destroy();
+            console.log('WhatsApp client destroyed.');
+        }
+    } catch (err) {
+        console.error('Error destroying client during shutdown:', err.message);
+    }
+    process.exit(0);
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+process.on('uncaughtException', (err) => {
+    console.error('UNCAUGHT EXCEPTION:', err);
+});
+process.on('unhandledRejection', (reason) => {
+    console.error('UNHANDLED REJECTION:', reason);
+});
+
 // === WhatsApp Client State Machine ===
 let clientState = 'DISCONNECTED'; // DISCONNECTED | INITIALIZING | QR_READY | AUTHENTICATED | READY | ERROR
 let clientStateMessage = 'Client disconnected';
