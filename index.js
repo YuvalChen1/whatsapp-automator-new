@@ -776,7 +776,8 @@ async function initializeWhatsAppClient(cleanAuthCache = false) {
             return;
         }
 
-        // === GATHERING WINDOW CHECK ===
+        // === GATHERING WINDOW CHECK (for report logging only, NOT chatbot) ===
+        let isInsideGatheringWindow = true;
         if (reportSettings && reportSettings.limitGathering) {
             try {
                 const formatter = new Intl.DateTimeFormat('en-GB', {
@@ -793,16 +794,14 @@ async function initializeWhatsAppClient(cleanAuthCache = false) {
                 const start = reportSettings.startTime || '00:00';
                 const end = reportSettings.endTime || '23:59';
 
-                let isInWindow = false;
                 if (start <= end) {
-                    isInWindow = (currentStr >= start && currentStr <= end);
+                    isInsideGatheringWindow = (currentStr >= start && currentStr <= end);
                 } else {
-                    isInWindow = (currentStr >= start || currentStr <= end);
+                    isInsideGatheringWindow = (currentStr >= start || currentStr <= end);
                 }
 
-                if (!isInWindow) {
-                    debugLog(eventSource, `SKIPPED - Message received at ${currentStr} is outside the active gathering window (${start} - ${end}).`);
-                    return;
+                if (!isInsideGatheringWindow) {
+                    debugLog(eventSource, `Message received at ${currentStr} is outside the gathering window (${start} - ${end}). Reply logging skipped, but chatbot will still evaluate.`);
                 }
             } catch (err) {
                 console.error('Failed to validate gathering window:', err.message);
@@ -839,11 +838,15 @@ async function initializeWhatsAppClient(cleanAuthCache = false) {
             messageText = messageText ? `[${label}] ${messageText}` : `[${label}]`;
         }
 
-        // --- Log every incoming reply for the Excel report ---
-        logReply(phone, displayName, isGroup ? `[Group Chat] ${messageText}` : messageText);
-        debugLog(eventSource, `Reply logged. repliesData keys: ${JSON.stringify(Object.keys(repliesData))}`);
+        // --- Log every incoming reply for the Excel report (only inside gathering window) ---
+        if (isInsideGatheringWindow) {
+            logReply(phone, displayName, isGroup ? `[Group Chat] ${messageText}` : messageText);
+            debugLog(eventSource, `Reply logged. repliesData keys: ${JSON.stringify(Object.keys(repliesData))}`);
+        } else {
+            debugLog(eventSource, `Reply NOT logged (outside gathering window). Chatbot still active.`);
+        }
 
-        // === CHATBOT HANDLING ===
+        // === CHATBOT HANDLING (always runs, regardless of gathering window) ===
         if (msg.hasMedia) {
             debugLog(eventSource, `Chatbot skipping media message (type: ${msg.type}).`);
             return;

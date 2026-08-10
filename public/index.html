@@ -2134,14 +2134,28 @@
                 }
 
                 const chatbotRuleCount = (schedule.chatbotRules && Array.isArray(schedule.chatbotRules)) ? schedule.chatbotRules.length : 0;
+                const isExistingBot = schedule.chatbotMode === 'existing' && schedule.chatbotId;
                 let chatbotBadgeText = t.chatbotOff;
-                if (schedule.chatbotEnabled !== false && chatbotRuleCount > 0) {
-                    chatbotBadgeText = chatbotRuleCount === 1
-                        ? t.chatbotRulesCount.replace('{count}', chatbotRuleCount)
-                        : t.chatbotRulesCountPlural.replace('{count}', chatbotRuleCount);
+                let chatbotActive = false;
+                
+                if (schedule.chatbotEnabled !== false && schedule.chatbotMode !== 'off') {
+                    if (isExistingBot) {
+                        // Find linked bot name
+                        const linkedBot = (chatbotConfig && chatbotConfig.chatbots) 
+                            ? chatbotConfig.chatbots.find(b => b.id === schedule.chatbotId) 
+                            : null;
+                        const botName = linkedBot ? linkedBot.name : 'Linked Bot';
+                        chatbotBadgeText = `🔗 ${botName}`;
+                        chatbotActive = true;
+                    } else if (chatbotRuleCount > 0) {
+                        chatbotBadgeText = chatbotRuleCount === 1
+                            ? t.chatbotRulesCount.replace('{count}', chatbotRuleCount)
+                            : t.chatbotRulesCountPlural.replace('{count}', chatbotRuleCount);
+                        chatbotActive = true;
+                    }
                 }
 
-                const chatbotBadge = (schedule.chatbotEnabled !== false && chatbotRuleCount > 0)
+                const chatbotBadge = chatbotActive
                     ? `<span style="color: #10b981;"><i class="fas fa-robot"></i> ${chatbotBadgeText}</span>`
                     : `<span style="color: var(--text-secondary);"><i class="fas fa-robot"></i> ${chatbotBadgeText}</span>`;
 
