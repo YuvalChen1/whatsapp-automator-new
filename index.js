@@ -389,6 +389,30 @@ function isTriggerMatch(triggerConfig, incomingBody) {
     });
 }
 
+function parseWorkerChoice(msgText) {
+    if (!msgText) return { choice: 'Other', label: 'Other / Uncategorized' };
+    const str = msgText.trim().toLowerCase();
+    
+    // Check exact match or leading number: "1", "1 - fine", "1. fine", "1, fine", "1 fine"
+    if (/^1(\s*[\-.,:]\s*|\s+|$)/i.test(str)) {
+        return { choice: '1', label: 'Option 1 ("1")' };
+    }
+    if (/^2(\s*[\-.,:]\s*|\s+|$)/i.test(str)) {
+        return { choice: '2', label: 'Option 2 ("2")' };
+    }
+    if (/^3(\s*[\-.,:]\s*|\s+|$)/i.test(str)) {
+        return { choice: '3', label: 'Option 3 ("3")' };
+    }
+
+    // Check if single digits 1, 2, or 3 appear as a standalone word anywhere in message
+    const tokens = str.split(/[\s,.-]+/);
+    if (tokens.includes('1')) return { choice: '1', label: 'Option 1 ("1")' };
+    if (tokens.includes('2')) return { choice: '2', label: 'Option 2 ("2")' };
+    if (tokens.includes('3')) return { choice: '3', label: 'Option 3 ("3")' };
+
+    return { choice: 'Other', label: 'Other / Uncategorized' };
+}
+
 function logReply(phone, name, messageText) {
     const now = new Date();
     let yearStr, monthStr, dayKey, timeStr;
@@ -1396,59 +1420,36 @@ app.get('/download-daily-report', async (req, res) => {
         // Sort chronologically by time ascending
         dayEntries.sort((a, b) => a.time.localeCompare(b.time));
 
+        // Group entries by choice (1, 2, 3, Other)
+        const groups = {
+            '1': [],
+            '2': [],
+            '3': [],
+            'Other': []
+        };
+
+        dayEntries.forEach(entry => {
+            const parsed = parseWorkerChoice(entry.message);
+            entry.detectedChoice = parsed.choice;
+            entry.detectedLabel = parsed.label;
+            if (groups[parsed.choice]) {
+                groups[parsed.choice].push(entry);
+            } else {
+                groups['Other'].push(entry);
+            }
+        });
+
         // Build Excel Workbook
         const workbook = new ExcelJS.Workbook();
         workbook.creator = 'WhatsApp Automator';
 
         const displayDate = `${dayStr}/${monStr}/${yearStr}`;
-        const worksheet = workbook.addWorksheet(`Daily Log ${dayStr}-${monStr}`);
-        worksheet.views = [{ showGridLines: true }];
 
-        // Title Block - now 3 columns
-        worksheet.mergeCells(1, 1, 1, 3);
-        const titleCell = worksheet.getCell(1, 1);
-        titleCell.value = `WhatsApp Automator - Daily Replies Report`;
-        titleCell.font = { name: 'Segoe UI', size: 16, bold: true, color: { argb: 'FF128C7E' } };
-        titleCell.alignment = { vertical: 'middle', horizontal: 'left' };
-        worksheet.getRow(1).height = 30;
-
-        // Subtitle Block
-        worksheet.mergeCells(2, 1, 2, 3);
-        const subtitleCell = worksheet.getCell(2, 1);
-        subtitleCell.value = `Date: ${displayDate} | Total Replies: ${dayEntries.length}`;
-        subtitleCell.font = { name: 'Segoe UI', size: 10, italic: true, color: { argb: 'FF6B7280' } };
-        subtitleCell.alignment = { vertical: 'middle', horizontal: 'left' };
-        worksheet.getRow(2).height = 20;
-
-        // Blank spacer
-        worksheet.addRow([]);
-
-        // Header row — 3 columns only: Time | Contact Name | Reply
-        const headerRow = ['Time', 'Contact Name', 'Reply'];
-        worksheet.addRow(headerRow);
-
-        const hRow = worksheet.getRow(4);
-        hRow.font = { name: 'Segoe UI', bold: true, color: { argb: 'FFFFFFFF' }, size: 11 };
-        hRow.alignment = { horizontal: 'left', vertical: 'middle' };
-        hRow.height = 28;
-        hRow.eachCell((cell) => {
-            cell.fill = {
-                type: 'pattern', pattern: 'solid',
-                fgColor: { argb: 'FF128C7E' }  // WhatsApp teal
-            };
-            cell.border = {
-                top: { style: 'thin', color: { argb: 'FF075E54' } },
-                bottom: { style: 'medium', color: { argb: 'FF075E54' } },
-                left: { style: 'thin', color: { argb: 'FF075E54' } },
-                right: { style: 'thin', color: { argb: 'FF075E54' } }
-            };
-        });
-        hRow.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
-
-        // Fixed column widths
-        worksheet.getColumn(1).width = 12; // Time
-        worksheet.getColumn(2).width = 28; // Contact Name
-        worksheet.getColumn(3).width = 65; // Reply (fixed!)
+        // ============================================================
+        // SHEET 1: Response Breakdown & Worker Lists
+        // ============================================================
+        const summarySheet = workbook.addWorksheet(`Response Breakdown`);
+        summarySheet.views = [{ showGridLines: true }];
 
         const borderStyle = {
             top: { style: 'thin', color: { argb: 'FFE5E7EB' } },
@@ -1457,48 +1458,187 @@ app.get('/download-daily-report', async (req, res) => {
             right: { style: 'thin', color: { argb: 'FFE5E7EB' } }
         };
 
-        if (dayEntries.length === 0) {
-            worksheet.mergeCells(5, 1, 5, 3);
-            const emptyCell = worksheet.getCell(5, 1);
-            emptyCell.value = 'No replies recorded for this day.';
-            emptyCell.font = { name: 'Segoe UI', italic: true, color: { argb: 'FF9CA3AF' } };
-            emptyCell.alignment = { horizontal: 'center', vertical: 'middle' };
-            worksheet.getRow(5).height = 24;
-            for (let c = 1; c <= 3; c++) {
-                worksheet.getCell(5, c).border = borderStyle;
+        // Title Block
+        summarySheet.mergeCells(1, 1, 1, 4);
+        const titleCell = summarySheet.getCell(1, 1);
+        titleCell.value = `WhatsApp Automator - Daily Response Summary & Worker Choices`;
+        titleCell.font = { name: 'Segoe UI', size: 16, bold: true, color: { argb: 'FF128C7E' } };
+        titleCell.alignment = { vertical: 'middle', horizontal: 'left' };
+        summarySheet.getRow(1).height = 30;
+
+        // Subtitle Block
+        summarySheet.mergeCells(2, 1, 2, 4);
+        const subtitleCell = summarySheet.getCell(2, 1);
+        subtitleCell.value = `Date: ${displayDate} | Total Workers Replied: ${dayEntries.length}`;
+        subtitleCell.font = { name: 'Segoe UI', size: 10, italic: true, color: { argb: 'FF6B7280' } };
+        subtitleCell.alignment = { vertical: 'middle', horizontal: 'left' };
+        summarySheet.getRow(2).height = 20;
+
+        summarySheet.addRow([]); // Spacer
+
+        // --- Table 1: Response Summary Count Table ---
+        const summaryHeader = ['Response Choice', 'Option Trigger', 'Worker Count', 'Percentage'];
+        summarySheet.addRow(summaryHeader);
+        const sumHRow = summarySheet.getRow(4);
+        sumHRow.font = { name: 'Segoe UI', bold: true, color: { argb: 'FFFFFFFF' }, size: 11 };
+        sumHRow.height = 26;
+        sumHRow.eachCell((cell) => {
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF128C7E' } };
+            cell.border = {
+                top: { style: 'thin', color: { argb: 'FF075E54' } },
+                bottom: { style: 'medium', color: { argb: 'FF075E54' } },
+                left: { style: 'thin', color: { argb: 'FF075E54' } },
+                right: { style: 'thin', color: { argb: 'FF075E54' } }
+            };
+        });
+
+        const totalReplies = dayEntries.length || 1; // avoid division by 0
+
+        const summaryRowsData = [
+            ['Option 1', '1', groups['1'].length, `${Math.round((groups['1'].length / totalReplies) * 100)}%`],
+            ['Option 2', '2', groups['2'].length, `${Math.round((groups['2'].length / totalReplies) * 100)}%`],
+            ['Option 3', '3', groups['3'].length, `${Math.round((groups['3'].length / totalReplies) * 100)}%`],
+            ['Other Replies', 'Text / Unrecognized', groups['Other'].length, `${Math.round((groups['Other'].length / totalReplies) * 100)}%`],
+            ['TOTAL WORKERS REPLIED', 'All Options', dayEntries.length, '100%']
+        ];
+
+        summaryRowsData.forEach((rData, idx) => {
+            const row = summarySheet.addRow(rData);
+            const isTotal = idx === summaryRowsData.length - 1;
+            row.height = 22;
+            row.eachCell((cell, colNum) => {
+                cell.font = { name: 'Segoe UI', size: 10, bold: isTotal };
+                cell.border = borderStyle;
+                if (isTotal) {
+                    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE5E7EB' } };
+                } else {
+                    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: idx % 2 === 0 ? 'FFF9FAFB' : 'FFFFFFFF' } };
+                }
+                if (colNum === 3 || colNum === 4) cell.alignment = { horizontal: 'center' };
+            });
+        });
+
+        summarySheet.addRow([]); // Spacer
+        summarySheet.addRow([]); // Spacer
+
+        // --- Categorized Lists: Who Replied What ---
+        const sectionsConfig = [
+            { key: '1', title: 'Workers Who Replied "1"', color: 'FF059669' }, // Emerald Green
+            { key: '2', title: 'Workers Who Replied "2"', color: 'FFD97706' }, // Amber Orange
+            { key: '3', title: 'Workers Who Replied "3"', color: 'FF2563EB' }, // Royal Blue
+            { key: 'Other', title: 'Other / Uncategorized Replies', color: 'FF4B5563' } // Dark Gray
+        ];
+
+        sectionsConfig.forEach(sec => {
+            const list = groups[sec.key] || [];
+            
+            // Section Header Banner
+            const bannerRow = summarySheet.addRow([`${sec.title} (${list.length} workers)`]);
+            const bannerCell = bannerRow.getCell(1);
+            summarySheet.mergeCells(bannerRow.number, 1, bannerRow.number, 4);
+            bannerCell.font = { name: 'Segoe UI', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
+            bannerCell.alignment = { vertical: 'middle', horizontal: 'left' };
+            bannerRow.height = 24;
+            bannerCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: sec.color } };
+
+            // Section Column Headers
+            const secHeaders = ['Time', 'Worker / Contact Name', 'Phone Number', 'Message Received'];
+            const secHRow = summarySheet.addRow(secHeaders);
+            secHRow.font = { name: 'Segoe UI', size: 10, bold: true, color: { argb: 'FF374151' } };
+            secHRow.height = 20;
+            secHRow.eachCell((cell) => {
+                cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE5E7EB' } };
+                cell.border = borderStyle;
+            });
+            secHRow.getCell(1).alignment = { horizontal: 'center' };
+
+            if (list.length === 0) {
+                const emptyRow = summarySheet.addRow(['-', 'No workers replied with this option today', '-', '-']);
+                emptyRow.height = 20;
+                emptyRow.eachCell(c => {
+                    c.font = { name: 'Segoe UI', size: 10, italic: true, color: { argb: 'FF9CA3AF' } };
+                    c.border = borderStyle;
+                });
+            } else {
+                list.forEach((item, lIdx) => {
+                    let rawName = item.name || '';
+                    let rawPhone = item.phone || '';
+                    let cleanName = rawName || rawPhone || 'Unnamed Contact';
+                    let phoneStr = rawPhone.replace(/[^0-9]/g, '');
+
+                    const itemRow = summarySheet.addRow([
+                        item.time,
+                        cleanName,
+                        phoneStr ? `+${phoneStr}` : 'N/A',
+                        item.message
+                    ]);
+                    itemRow.height = 20;
+                    itemRow.eachCell((cell, colNum) => {
+                        cell.font = { name: 'Segoe UI', size: 10 };
+                        cell.border = borderStyle;
+                        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: lIdx % 2 === 0 ? 'FFF9FAFB' : 'FFFFFFFF' } };
+                        if (colNum === 1 || colNum === 3) cell.alignment = { horizontal: 'center' };
+                    });
+                });
             }
+
+            summarySheet.addRow([]); // Spacer
+        });
+
+        // Column Widths for Sheet 1
+        summarySheet.getColumn(1).width = 16;
+        summarySheet.getColumn(2).width = 32;
+        summarySheet.getColumn(3).width = 24;
+        summarySheet.getColumn(4).width = 55;
+
+        // ============================================================
+        // SHEET 2: Full Chronological Daily Log
+        // ============================================================
+        const logSheet = workbook.addWorksheet(`Chronological Log`);
+        logSheet.views = [{ showGridLines: true }];
+
+        logSheet.mergeCells(1, 1, 1, 4);
+        const logTitle = logSheet.getCell(1, 1);
+        logTitle.value = `WhatsApp Automator - Full Daily Log (${displayDate})`;
+        logTitle.font = { name: 'Segoe UI', size: 16, bold: true, color: { argb: 'FF128C7E' } };
+        logSheet.getRow(1).height = 30;
+
+        logSheet.addRow([]); // Spacer
+
+        const logHeaderRow = ['Time', 'Worker / Contact Name', 'Choice', 'Message Received'];
+        logSheet.addRow(logHeaderRow);
+        const lHRow = logSheet.getRow(3);
+        lHRow.font = { name: 'Segoe UI', bold: true, color: { argb: 'FFFFFFFF' }, size: 11 };
+        lHRow.height = 26;
+        lHRow.eachCell((cell) => {
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF128C7E' } };
+            cell.border = borderStyle;
+        });
+
+        logSheet.getColumn(1).width = 12;
+        logSheet.getColumn(2).width = 30;
+        logSheet.getColumn(3).width = 22;
+        logSheet.getColumn(4).width = 60;
+
+        if (dayEntries.length === 0) {
+            logSheet.mergeCells(4, 1, 4, 4);
+            const emptyC = logSheet.getCell(4, 1);
+            emptyC.value = 'No replies recorded for this day.';
+            emptyC.font = { name: 'Segoe UI', italic: true, color: { argb: 'FF9CA3AF' } };
         } else {
             dayEntries.forEach((entry, idx) => {
-                let rawName = entry.name || '';
-                let rawPhone = entry.phone || '';
-                let cleanName = '';
-
-                if (rawName) {
-                    cleanName = rawName;
-                } else {
-                    // Fallback: old format where phone field may contain the display name
-                    const hasLetters = /[a-zA-Zא-ת]/.test(rawPhone);
-                    cleanName = (hasLetters || !rawPhone.replace(/[^0-9]/g, '')) ? rawPhone : '';
-                }
-
-                const rowData = [
+                const row = logSheet.addRow([
                     entry.time,
-                    cleanName || 'Unnamed Contact',
+                    entry.name || entry.phone || 'Unnamed Contact',
+                    entry.detectedLabel || 'Other',
                     entry.message
-                ];
-
-                const row = worksheet.addRow(rowData);
-                row.alignment = { vertical: 'top', wrapText: true };
-                row.getCell(1).alignment = { horizontal: 'center', vertical: 'top' };
-
-                const zebraColor = idx % 2 === 0 ? 'FFF9FAFB' : 'FFFFFFFF';
-                row.eachCell((cell) => {
-                    cell.fill = {
-                        type: 'pattern', pattern: 'solid',
-                        fgColor: { argb: zebraColor }
-                    };
-                    cell.border = borderStyle;
+                ]);
+                row.height = 20;
+                row.eachCell((cell, colNum) => {
                     cell.font = { name: 'Segoe UI', size: 10 };
+                    cell.border = borderStyle;
+                    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: idx % 2 === 0 ? 'FFF9FAFB' : 'FFFFFFFF' } };
+                    if (colNum === 1 || colNum === 3) cell.alignment = { horizontal: 'center' };
                 });
             });
         }
@@ -1511,7 +1651,7 @@ app.get('/download-daily-report', async (req, res) => {
         await workbook.xlsx.write(res);
         res.end();
 
-        console.log(`Excel daily report downloaded: ${filename}`);
+        console.log(`Excel daily report downloaded with response breakdown: ${filename}`);
     } catch (err) {
         console.error('Error generating Excel daily report:', err.message);
         res.status(500).json({ error: 'Failed to generate report: ' + err.message });
