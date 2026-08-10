@@ -104,540 +104,226 @@ let activeAutomation = null; // Stores running automation state
 let shouldStopAutomation = false;
 let activeCronJobs = new Map();
 
-// === IN-MEMORY DEBUG LOG (viewable from browser via /api/debug-log) ===
-const debugLogEntries = [];
-const MAX_DEBUG_ENTRIES = 200;
-function debugLog(tag, message) {
-    const entry = `[${new Date().toISOString()}] [${tag}] ${message}`;
-    console.log(entry);
-    debugLogEntries.push(entry);
-    if (debugLogEntries.length > MAX_DEBUG_ENTRIES) debugLogEntries.shift();
-    // Also push to connected dashboard clients in real-time
-    io.emit('debug_log', entry);
-}
+// === WhatsApp Client State Machine ===
+let clientState = 'DISCONNECTED'; // DISCONNECTED | INITIALIZING | QR_READY | AUTHENTICATED | READY | ERROR
+let clientStateMessage = 'Client disconnected';
+let clientInitStartTime = null;
+let initWatchdogTimer = null;
+let isInitializingMutex = false;
 
-// Track processed message IDs to avoid duplicate processing from dual event listeners
-const processedMessageIds = new Set();
-const MAX_PROCESSED_IDS = 1000;
-function markProcessed(id) {
-    processedMessageIds.add(id);
-    if (processedMessageIds.size > MAX_PROCESSED_IDS) {
-        const first = processedMessageIds.values().next().value;
-        processedMessageIds.delete(first);
-    }
-}
-
-// === LID-TO-PHONE MAPPING ===
-// WhatsApp now uses @lid (Linked ID) format for message routing.
-// We need to map LID <-> phone number so we can match incoming @lid messages
-// against our targeted contacts stored as @c.us.
-const LID_MAP_FILE = path.join(DATA_DIR, 'lid_map.json');
-let lidToPhone = {};  // { "73933600633038@lid": "972506798676@c.us", ... }
-let phoneToLid = {};  // reverse map
-
-if (fs.existsSync(LID_MAP_FILE)) {
-    try {
-        lidToPhone = JSON.parse(fs.readFileSync(LID_MAP_FILE, 'utf8'));
-        // Build reverse map
-        for (const [lid, phone] of Object.entries(lidToPhone)) {
-            phoneToLid[phone] = lid;
-        }
-        console.log(`Loaded LID map with ${Object.keys(lidToPhone).length} entries.`);
-    } catch (e) {
-        console.error('Error reading lid_map.json:', e.message);
-    }
-}
-
-function saveLidMap() {
-    try {
-        fs.writeFileSync(LID_MAP_FILE, JSON.stringify(lidToPhone, null, 2));
-    } catch (err) {
-        console.error('Failed to save lid_map.json:', err.message);
-    }
-}
-
-function registerLidMapping(lid, phoneJid) {
-    if (!lid || !phoneJid) return;
-    if (lidToPhone[lid] === phoneJid) return; // already mapped
-    lidToPhone[lid] = phoneJid;
-    phoneToLid[phoneJid] = lid;
-    saveLidMap();
-    debugLog('LID_MAP', `Mapped ${lid} <-> ${phoneJid}`);
-}
-
-function resolveToPhone(jid) {
-    // If it's already a @c.us or @g.us, return as-is
-    if (!jid) return jid;
-    if (jid.endsWith('@c.us') || jid.endsWith('@g.us')) return jid;
-    // If it's a @lid, try to resolve
-    if (jid.endsWith('@lid') && lidToPhone[jid]) {
-        return lidToPhone[jid];
-    }
-    return jid; // unresolvable, return as-is
-}
-
-// Schedule Configuration state
-let scheduleConfig = {
-    enabled: true,
-    schedules: []
-};
-
-// Chatbot Configuration state
-let chatbotConfig = {
-    chatbots: []
-};
-
-// Replies tracking data: { "YYYY-MM": { "DD": [ { phone, message, time } ] } }
-let repliesData = {};
-
-// Load existing configs
-if (DATA_DIR !== __dirname) {
-    // Ensure the persistent folder exists
-    if (!fs.existsSync(DATA_DIR)) {
-        try {
-            fs.mkdirSync(DATA_DIR, { recursive: true });
-        } catch (err) {
-            console.error('Failed to create DATA_DIR:', err.message);
-        }
-    }
-    const filesToCopy = ['schedule.json', 'chatbot_rules.json'];
-    filesToCopy.forEach(file => {
-        const targetPath = path.join(DATA_DIR, file);
-        const sourcePath = path.join(__dirname, file);
-        if (!fs.existsSync(targetPath) && fs.existsSync(sourcePath)) {
-            try {
-                fs.copyFileSync(sourcePath, targetPath);
-                console.log(`Initialized persistent volume file: ${file}`);
-            } catch (err) {
-                console.error(`Failed to copy ${file} to persistent disk:`, err.message);
-            }
-        }
-    });
-}
-
-if (fs.existsSync(SCHEDULE_FILE)) {
-    try {
-        const raw = fs.readFileSync(SCHEDULE_FILE, 'utf8');
-        scheduleConfig = JSON.parse(raw);
-        
-        // Migrate old format to multi-schedule format
-        if (!scheduleConfig.schedules) {
-            scheduleConfig.schedules = [];
-            if (scheduleConfig.time || scheduleConfig.contacts) {
-                scheduleConfig.schedules.push({
-                    id: 'default-' + Date.now(),
-                    name: 'Default Schedule',
-                    enabled: scheduleConfig.enabled !== undefined ? scheduleConfig.enabled : true,
-                    time: scheduleConfig.time || '07:00',
-                    timezone: scheduleConfig.timezone || 'UTC',
-                    contacts: scheduleConfig.contacts || [],
-                    message: scheduleConfig.message || ''
-                });
-            }
-            // Ensure global enabled defaults to true now that schedules have individual enable flags
-            scheduleConfig.enabled = true;
-        }
-        console.log(`Loaded schedule configuration: ${scheduleConfig.schedules.length} schedules registered.`);
-    } catch (e) {
-        console.error('Error reading schedule.json:', e.message);
-    }
-}
-
-if (fs.existsSync(CHATBOT_FILE)) {
-    try {
-        const raw = fs.readFileSync(CHATBOT_FILE, 'utf8');
-        const parsed = JSON.parse(raw);
-        if (parsed.chatbots && Array.isArray(parsed.chatbots)) {
-            chatbotConfig = parsed;
-        } else {
-            chatbotConfig = {
-                chatbots: [
-                    {
-                        id: 'bot-default',
-                        name: 'Default Chatbot',
-                        enabled: parsed.enabled !== undefined ? parsed.enabled : true,
-                        isDefault: true,
-                        rules: parsed.rules || []
-                    }
-                ]
-            };
-        }
-        console.log(`Loaded chatbot configuration: ${chatbotConfig.chatbots.length} chatbots registered.`);
-    } catch (e) {
-        console.error('Error reading chatbot_rules.json:', e.message);
-    }
-}
-
-if (fs.existsSync(REPLIES_FILE)) {
-    try {
-        const raw = fs.readFileSync(REPLIES_FILE, 'utf8');
-        repliesData = JSON.parse(raw);
-        console.log('Loaded replies tracking data.');
-    } catch (e) {
-        console.error('Error reading replies.json:', e.message);
-    }
-}
-
-let reportSettings = {
-    limitGathering: false,
-    startTime: '07:00',
-    endTime: '12:00',
-    reportSources: [] // array of { id, name, type } — empty = all targeted contacts
-};
-
-if (fs.existsSync(REPORT_SETTINGS_FILE)) {
-    try {
-        const raw = fs.readFileSync(REPORT_SETTINGS_FILE, 'utf8');
-        reportSettings = JSON.parse(raw);
-        console.log('Loaded report settings:', reportSettings);
-    } catch (e) {
-        console.error('Error reading report_settings.json:', e.message);
-    }
-}
-
-// === TARGETED CONTACTS TRACKING ===
-let targetedContacts = new Set();
-
-if (fs.existsSync(TARGETED_CONTACTS_FILE)) {
-    try {
-        const raw = fs.readFileSync(TARGETED_CONTACTS_FILE, 'utf8');
-        const parsed = JSON.parse(raw);
-        targetedContacts = new Set(parsed);
-        console.log(`Loaded ${targetedContacts.size} targeted contacts.`);
-    } catch (e) {
-        console.error('Error reading targeted_contacts.json:', e.message);
-    }
-}
-
-function recordTargetedContact(id) {
-    console.log(`[recordTargetedContact] Called with id: ${id}, already tracked: ${targetedContacts.has(id)}, current set size: ${targetedContacts.size}`);
-    if (!targetedContacts.has(id)) {
-        targetedContacts.add(id);
-        try {
-            fs.writeFileSync(TARGETED_CONTACTS_FILE, JSON.stringify(Array.from(targetedContacts), null, 2));
-            console.log(`[recordTargetedContact] SUCCESS - Recorded new targeted contact: ${id}. Total tracked: ${targetedContacts.size}`);
-        } catch (err) {
-            console.error('[recordTargetedContact] FAILED to write targeted_contacts.json:', err.message);
-        }
-        // Notify UI in real-time
-        io.emit('targeted_update', { count: targetedContacts.size, contacts: Array.from(targetedContacts) });
-    }
-}
-
-function updateTargetedFromSchedule() {
-    if (scheduleConfig && scheduleConfig.schedules) {
-        scheduleConfig.schedules.forEach(schedule => {
-            if (!schedule.enabled) return;
-            if (schedule.contacts) {
-                schedule.contacts.forEach(c => {
-                    const rawPhone = c.phone.toString().trim();
-                    let whatsappId;
-                    if (rawPhone.endsWith('@g.us')) {
-                        whatsappId = rawPhone;
-                    } else if (rawPhone.endsWith('@c.us') || rawPhone.endsWith('@lid')) {
-                        whatsappId = rawPhone;
-                    } else {
-                        const cleanPhone = rawPhone.replace(/[^0-9]/g, '');
-                        whatsappId = `${cleanPhone}@c.us`;
-                    }
-                    recordTargetedContact(whatsappId);
-                });
-            }
-        });
-    }
-}
-
-function isTargeted(jid) {
-    if (!jid) return false;
+function setClientStatus(status, message = '') {
+    clientState = status;
+    clientStateMessage = message;
     
-    // Direct check (works for groups and correct user JIDs)
-    if (targetedContacts.has(jid)) return true;
-    
-    // Suffix check for user JIDs (resilient against country code differences)
-    if (jid.endsWith('@c.us')) {
-        const cleanIncoming = jid.split('@')[0].replace(/[^0-9]/g, '');
-        // If the number is short, don't do suffix match to avoid collision
-        if (cleanIncoming.length >= 7) {
-            for (const target of targetedContacts) {
-                if (target.endsWith('@c.us')) {
-                    const cleanTarget = target.split('@')[0].replace(/[^0-9]/g, '');
-                    if (cleanTarget.length >= 7) {
-                        const tailIncoming = cleanIncoming.slice(-7);
-                        const tailTarget = cleanTarget.slice(-7);
-                        if (tailIncoming === tailTarget) {
-                            return true;
-                        }
-                    }
-                }
-            }
-        }
-    }
-    return false;
-}
-
-// Helper: log every incoming reply to repliesData and persist
-function logReply(phone, name, messageText) {
-    const now = new Date();
-    
-    let yearStr, monthStr, dayKey, timeStr;
-    try {
-        const formatter = new Intl.DateTimeFormat('en-GB', {
-            timeZone: 'Asia/Jerusalem',
-            year: 'numeric',
-            month: '2-digit',
-            day: '2-digit',
-            hour: '2-digit',
-            minute: '2-digit',
-            hour12: false
-        });
-        const parts = formatter.formatToParts(now);
-        const dateObj = {};
-        parts.forEach(p => { dateObj[p.type] = p.value; });
-        
-        yearStr = dateObj.year;
-        monthStr = dateObj.month;
-        dayKey = dateObj.day;
-        timeStr = `${dateObj.hour}:${dateObj.minute}`;
-    } catch (err) {
-        console.error('Failed to format date in Israel timezone:', err.message);
-        yearStr = String(now.getUTCFullYear());
-        monthStr = String(now.getUTCMonth() + 1).padStart(2, '0');
-        dayKey = String(now.getUTCDate()).padStart(2, '0');
-        timeStr = now.toLocaleTimeString('en-GB', { timeZone: 'UTC', hour: '2-digit', minute: '2-digit' });
-    }
-    
-    const monthKey = `${yearStr}-${monthStr}`;
-
-    if (!repliesData[monthKey]) repliesData[monthKey] = {};
-    if (!repliesData[monthKey][dayKey]) repliesData[monthKey][dayKey] = [];
-
-    repliesData[monthKey][dayKey].push({
-        phone,
-        name,
-        message: messageText,
-        time: timeStr
-    });
-
-    // Persist to disk
-    try {
-        fs.writeFileSync(REPLIES_FILE, JSON.stringify(repliesData, null, 2));
-    } catch (err) {
-        console.error('Failed to save replies.json:', err.message);
-    }
-
-    // Notify dashboard in real-time
-    io.emit('new_reply', { phone, name, message: messageText, time: timeStr, day: dayKey, month: monthKey });
-}
-
-// ============================================================
-//  Session Copy Helpers (persistent disk <-> local /tmp)
-// ============================================================
-function copyDirSync(src, dest) {
-    fs.mkdirSync(dest, { recursive: true });
-    const entries = fs.readdirSync(src, { withFileTypes: true });
-    for (const entry of entries) {
-        const srcPath = path.join(src, entry.name);
-        const destPath = path.join(dest, entry.name);
-        // Skip lock files - never copy them
-        if (['SingletonLock', 'SingletonCookie', 'SingletonSocket'].includes(entry.name)) {
-            continue;
-        }
-        try {
-            if (entry.isDirectory()) {
-                copyDirSync(srcPath, destPath);
-            } else {
-                fs.copyFileSync(srcPath, destPath);
-            }
-        } catch (err) {
-            // Skip files that can't be copied (broken symlinks, etc.)
-            if (err.code !== 'ENOENT') {
-                console.warn(`  Skipping ${srcPath}: ${err.message}`);
-            }
-        }
-    }
-}
-
-function restoreSessionFromBackup() {
-    if (fs.existsSync(PERSISTENT_SESSION_DIR)) {
-        console.log(`Restoring session from persistent backup: ${PERSISTENT_SESSION_DIR}`);
-        try {
-            copyDirSync(PERSISTENT_SESSION_DIR, LOCAL_SESSION_DIR);
-            console.log(`Session restored to: ${LOCAL_SESSION_DIR}`);
-        } catch (err) {
-            console.error('Failed to restore session backup:', err.message);
-        }
+    if (status === 'READY') {
+        whatsappClientReady = true;
     } else {
-        console.log('No session backup found on persistent disk. Will need QR scan.');
+        whatsappClientReady = false;
+    }
+
+    if (status !== 'QR_READY') {
+        lastQrCodeData = null;
+    }
+
+    console.log(`[CLIENT STATUS CHANGE] ${status}: ${message}`);
+    broadcastClientStatus();
+}
+
+function broadcastClientStatus(targetSocket = null) {
+    const elapsedSeconds = clientInitStartTime ? Math.round((Date.now() - clientInitStartTime) / 1000) : 0;
+    const payload = {
+        status: clientState,
+        message: clientStateMessage,
+        ready: whatsappClientReady,
+        hasQr: lastQrCodeData !== null,
+        qrCodeUrl: lastQrCodeData,
+        elapsedSeconds: elapsedSeconds
+    };
+
+    if (targetSocket) {
+        targetSocket.emit('client_status', payload);
+    } else {
+        io.emit('client_status', payload);
     }
 }
 
-function backupSessionToPersistent() {
-    if (fs.existsSync(LOCAL_SESSION_DIR)) {
-        console.log(`Backing up session to persistent disk: ${PERSISTENT_SESSION_DIR}`);
-        try {
-            // Remove old backup first
-            if (fs.existsSync(PERSISTENT_SESSION_DIR)) {
-                fs.rmSync(PERSISTENT_SESSION_DIR, { recursive: true, force: true });
-            }
-            copyDirSync(LOCAL_SESSION_DIR, PERSISTENT_SESSION_DIR);
-            console.log('Session backup complete.');
-        } catch (err) {
-            console.error('Failed to backup session:', err.message);
-        }
-    }
-}
-
-// ============================================================
-//  Startup: Restore session from persistent disk to /tmp
-// ============================================================
-console.log('--- Session Setup ---');
-fs.mkdirSync(LOCAL_AUTH_DIR, { recursive: true });
-restoreSessionFromBackup();
-
-// Client variable
-let client = null;
-
-// Graceful shutdown handler
-async function gracefulShutdown(signal) {
-    console.log(`Received ${signal}. Shutting down gracefully...`);
-    // Backup session BEFORE destroying client
-    backupSessionToPersistent();
+// Clean Chromium locks left behind by crashes or process kills
+function cleanSessionLocks(dirPath) {
+    if (!fs.existsSync(dirPath)) return;
     try {
-        if (client) {
-            console.log('Destroying WhatsApp client...');
-            await client.destroy();
-            console.log('WhatsApp client destroyed.');
+        const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+        for (const entry of entries) {
+            const fullPath = path.join(dirPath, entry.name);
+            if (['SingletonLock', 'SingletonCookie', 'SingletonSocket', 'DevToolsActivePort', 'LOCK'].includes(entry.name)) {
+                try {
+                    fs.unlinkSync(fullPath);
+                    console.log(`Removed stale lock file: ${entry.name}`);
+                } catch (e) {}
+            } else if (entry.isDirectory()) {
+                cleanSessionLocks(fullPath);
+            }
         }
-    } catch (err) {
-        console.error('Error destroying client during shutdown:', err.message);
+    } catch (e) {
+        console.warn('Error while cleaning session locks:', e.message);
     }
-    process.exit(0);
 }
 
-process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-process.on('SIGINT', () => gracefulShutdown('SIGINT'));
-
-// Catch unhandled errors so they show in Render logs instead of silent crash
-process.on('uncaughtException', (err) => {
-    console.error('UNCAUGHT EXCEPTION:', err);
-});
-process.on('unhandledRejection', (reason) => {
-    console.error('UNHANDLED REJECTION:', reason);
-});
-
-// Create the WhatsApp client - Chromium runs from LOCAL /tmp directory
-function initializeWhatsAppClient() {
-    whatsappClientReady = false;
-    lastQrCodeData = null;
-    io.emit('disconnected'); // Reset UI status
+// Safely destroy existing client instance & clean lock files
+async function safeCleanupClient(cleanAuthCache = false) {
+    if (initWatchdogTimer) {
+        clearTimeout(initWatchdogTimer);
+        initWatchdogTimer = null;
+    }
 
     if (client) {
-        console.log('Client already exists. Destroying first...');
+        console.log('Closing existing WhatsApp client instance...');
         try {
-            client.destroy().catch(err => console.error('Error in client.destroy catch:', err.message));
+            await Promise.race([
+                client.destroy(),
+                new Promise(resolve => setTimeout(resolve, 4000))
+            ]);
         } catch (err) {
-            console.error('Error destroying client:', err.message);
+            console.warn('Warning during client.destroy:', err.message);
         }
+        client = null;
     }
 
-    console.log('Initializing WhatsApp Client...');
-    client = new Client({
-        authStrategy: new LocalAuth({
-            dataPath: LOCAL_AUTH_DIR  // /tmp/wwebjs_auth - container-local, no lock conflicts!
-        }),
-        puppeteer: {
-            headless: true,
-            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-            args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-accelerated-2d-canvas',
-                '--no-first-run',
-                '--disable-gpu',
-                // Single-process mode saves ~150MB RAM (safe now that locks run from /tmp)
-                '--single-process',
-                '--no-zygote',
-                // Aggressive memory reduction
-                '--renderer-process-limit=1',
-                '--disable-features=site-per-process',
-                '--disable-extensions',
-                '--disable-background-networking',
-                '--disable-default-apps',
-                '--disable-translate',
-                '--disable-sync',
-                '--disable-notifications',
-                '--disable-component-update',
-                '--disable-domain-reliability',
-                '--disable-print-preview',
-                '--disable-speech-api',
-                '--metrics-recording-only',
-                '--no-default-browser-check',
-                '--disk-cache-size=0',
-                '--media-cache-size=0',
-                '--js-flags=--max-old-space-size=128'
-            ]
-        }
-    });
+    whatsappClientReady = false;
+    lastQrCodeData = null;
 
-    // WhatsApp Event Listeners
-    client.on('qr', async (qr) => {
-        console.log('QR Code received, converting for Web UI...');
-        qrcodeTerminal.generate(qr, { small: true });
-        
+    if (cleanAuthCache) {
+        console.log('Clearing entire WhatsApp auth session cache...');
         try {
-            const qrUrl = await qrcode.toDataURL(qr);
-            lastQrCodeData = qrUrl;
-            whatsappClientReady = false;
-            io.emit('qr', qrUrl);
+            if (fs.existsSync(LOCAL_AUTH_DIR)) fs.rmSync(LOCAL_AUTH_DIR, { recursive: true, force: true });
+            if (fs.existsSync(PERSISTENT_SESSION_DIR)) fs.rmSync(PERSISTENT_SESSION_DIR, { recursive: true, force: true });
+            fs.mkdirSync(LOCAL_AUTH_DIR, { recursive: true });
         } catch (err) {
-            console.error('Failed to generate QR data URL:', err.message);
+            console.error('Error clearing auth session directories:', err.message);
         }
-    });
+    } else {
+        // Just clean profile locks
+        cleanSessionLocks(LOCAL_AUTH_DIR);
+    }
+}
 
-    client.on('authenticated', () => {
-        console.log('WhatsApp Authenticated!');
-        lastQrCodeData = null;
-        io.emit('authenticated');
-        // Backup session right after successful authentication
-        backupSessionToPersistent();
-    });
+// Create the WhatsApp client - Chromium runs from LOCAL /tmp directory
+async function initializeWhatsAppClient(cleanAuthCache = false) {
+    if (isInitializingMutex) {
+        console.log('Initialization already in progress. Skipping duplicate call...');
+        return;
+    }
 
-    client.on('auth_failure', (msg) => {
-        console.error('WhatsApp Authentication Failure:', msg);
-        io.emit('automation_log', { message: `Auth Failure: ${msg}`, type: 'error' });
-    });
+    isInitializingMutex = true;
+    clientInitStartTime = Date.now();
+    setClientStatus('INITIALIZING', cleanAuthCache ? 'Clearing cache & preparing QR code...' : 'Starting WhatsApp Web engine & restoring session...');
+    io.emit('disconnected'); // Legacy UI compatibility
 
-    client.on('ready', () => {
-        console.log('WhatsApp Client Ready!');
-        whatsappClientReady = true;
-        lastQrCodeData = null;
-        io.emit('ready');
-        // Also backup when client is fully ready
-        backupSessionToPersistent();
-    });
+    try {
+        await safeCleanupClient(cleanAuthCache);
 
-    client.on('disconnected', (reason) => {
-        console.log('WhatsApp Client Disconnected:', reason);
-        whatsappClientReady = false;
-        lastQrCodeData = null;
-        io.emit('disconnected');
-    });
+        console.log('Spawning new WhatsApp Client instance...');
+        client = new Client({
+            authStrategy: new LocalAuth({
+                dataPath: LOCAL_AUTH_DIR  // /tmp/wwebjs_auth - container-local
+            }),
+            puppeteer: {
+                headless: true,
+                executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+                args: [
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox',
+                    '--disable-dev-shm-usage',
+                    '--disable-accelerated-2d-canvas',
+                    '--no-first-run',
+                    '--disable-gpu',
+                    '--no-zygote',
+                    '--renderer-process-limit=1',
+                    '--disable-features=site-per-process',
+                    '--disable-extensions',
+                    '--disable-background-networking',
+                    '--disable-default-apps',
+                    '--disable-translate',
+                    '--disable-sync',
+                    '--disable-notifications',
+                    '--disable-component-update',
+                    '--disable-domain-reliability',
+                    '--disable-print-preview',
+                    '--disable-speech-api',
+                    '--metrics-recording-only',
+                    '--no-default-browser-check',
+                    '--disk-cache-size=0',
+                    '--media-cache-size=0',
+                    '--js-flags=--max-old-space-size=128'
+                ]
+            }
+        });
 
-    // === SHARED MESSAGE HANDLER (attached to both 'message' and 'message_create') ===
-    async function handleIncomingMessage(msg, eventSource) {
-        // Ignore our own outgoing messages
-        if (msg.fromMe) {
-            return;
-        }
+        // 75-second Initialization Watchdog
+        if (initWatchdogTimer) clearTimeout(initWatchdogTimer);
+        initWatchdogTimer = setTimeout(() => {
+            if (clientState === 'INITIALIZING') {
+                console.error('WATCHDOG TRIGGERED: WhatsApp client initialization timed out after 75s!');
+                setClientStatus('ERROR', 'Initialization timed out after 75 seconds. Please click restart.');
+                io.emit('init_error', { message: 'Initialization timed out after 75s. Click restart to retry.' });
+                io.emit('automation_log', { message: '❌ Initialization timed out (75s). Click restart to retry.', type: 'error' });
+            }
+        }, 75000);
 
-        // Deduplicate
-        const msgId = msg.id && msg.id._serialized ? msg.id._serialized : msg.id;
-        if (processedMessageIds.has(msgId)) {
-            debugLog(eventSource, `DEDUP - already processed ${msgId}, skipping.`);
-            return;
-        }
-        markProcessed(msgId);
+        // WhatsApp Event Listeners
+        client.on('qr', async (qr) => {
+            console.log('QR Code received, converting for Web UI...');
+            if (initWatchdogTimer) clearTimeout(initWatchdogTimer);
+            qrcodeTerminal.generate(qr, { small: true });
+            
+            try {
+                const qrUrl = await qrcode.toDataURL(qr);
+                lastQrCodeData = qrUrl;
+                setClientStatus('QR_READY', 'QR Code generated. Scan with WhatsApp app.');
+                io.emit('qr', qrUrl);
+            } catch (err) {
+                console.error('Failed to generate QR data URL:', err.message);
+            }
+        });
+
+        client.on('authenticated', () => {
+            console.log('WhatsApp Authenticated!');
+            lastQrCodeData = null;
+            setClientStatus('AUTHENTICATED', 'Authenticated! Syncing WhatsApp web...');
+            io.emit('authenticated');
+            backupSessionToPersistent();
+        });
+
+        client.on('auth_failure', (msg) => {
+            console.error('WhatsApp Authentication Failure:', msg);
+            if (initWatchdogTimer) clearTimeout(initWatchdogTimer);
+            setClientStatus('ERROR', `Authentication failure: ${msg}`);
+            io.emit('automation_log', { message: `Auth Failure: ${msg}`, type: 'error' });
+        });
+
+        client.on('ready', () => {
+            console.log('WhatsApp Client Ready!');
+            if (initWatchdogTimer) clearTimeout(initWatchdogTimer);
+            setClientStatus('READY', 'WhatsApp client connected & ready.');
+            io.emit('ready');
+            backupSessionToPersistent();
+        });
+
+        client.on('disconnected', (reason) => {
+            console.log('WhatsApp Client Disconnected:', reason);
+            if (initWatchdogTimer) clearTimeout(initWatchdogTimer);
+            setClientStatus('DISCONNECTED', `Disconnected: ${reason || 'Session ended'}`);
+            io.emit('disconnected');
+        });
+
+        // === SHARED MESSAGE HANDLER (attached to both 'message' and 'message_create') ===
+        async function handleIncomingMessage(msg, eventSource) {
+            if (msg.fromMe) return;
+            const msgId = msg.id && msg.id._serialized ? msg.id._serialized : msg.id;
+            if (processedMessageIds.has(msgId)) {
+                debugLog(eventSource, `DEDUP - already processed ${msgId}, skipping.`);
+                return;
+            }
+            markProcessed(msgId);
 
         // === RESOLVE @lid TO PHONE NUMBER ===
         let resolvedFrom = msg.from;
@@ -866,10 +552,17 @@ function initializeWhatsAppClient() {
         handleIncomingMessage(msg, 'MSG_CREATE');
     });
 
-    client.initialize().catch(err => {
+    await client.initialize().catch(err => {
         console.error('Failed to initialize client:', err.message);
+        setClientStatus('ERROR', `Initialization error: ${err.message}`);
         io.emit('automation_log', { message: `❌ Initialization failed: ${err.message}`, type: 'error' });
     });
+    } catch (err) {
+        console.error('Unexpected error during initializeWhatsAppClient:', err.message);
+        setClientStatus('ERROR', `Initialization error: ${err.message}`);
+    } finally {
+        isInitializingMutex = false;
+    }
 }
 
 // Initial client startup
@@ -1384,15 +1077,18 @@ app.get('/download-daily-report', async (req, res) => {
 // API route: get system diagnostics status
 app.get('/api/status', (req, res) => {
     const memory = process.memoryUsage();
+    const elapsedSeconds = clientInitStartTime ? Math.round((Date.now() - clientInitStartTime) / 1000) : 0;
     res.json({
         ready: whatsappClientReady,
         hasQr: lastQrCodeData !== null,
+        clientState: clientState,
+        clientStateMessage: clientStateMessage,
+        elapsedSeconds: elapsedSeconds,
         uptime: Math.round(process.uptime()),
         memory: {
             heapUsed: Math.round(memory.heapUsed / 1024 / 1024) + ' MB',
             rss: Math.round(memory.rss / 1024 / 1024) + ' MB'
         },
-        clientState: client ? 'Initialized' : 'Not Initialized',
         targetedCount: targetedContacts.size,
         targetedContacts: Array.from(targetedContacts)
     });
@@ -1401,7 +1097,7 @@ app.get('/api/status', (req, res) => {
 // API route: view debug log from the browser (no Render console needed!)
 app.get('/api/debug-log', (req, res) => {
     res.json({
-        version: '2.3.0',
+        version: '2.5.0',
         totalEntries: debugLogEntries.length,
         entries: debugLogEntries,
         targetedContacts: Array.from(targetedContacts),
@@ -1411,16 +1107,26 @@ app.get('/api/debug-log', (req, res) => {
         chatbotRules: chatbotConfig.rules,
         repliesDataKeys: Object.keys(repliesData),
         repliesData: repliesData,
-        whatsappReady: whatsappClientReady
+        whatsappReady: whatsappClientReady,
+        clientState: clientState
     });
 });
 
 // API route: manually restart/refresh the WhatsApp client
-app.post('/api/restart-client', (req, res) => {
+app.post('/api/restart-client', async (req, res) => {
     console.log('Manual request received via REST API to restart WhatsApp client...');
+    const cleanSession = req.body && req.body.cleanSession === true;
     try {
-        initializeWhatsAppClient();
-        res.json({ success: true, message: 'WhatsApp client restart initiated.' });
+        // Run restart asynchronously
+        initializeWhatsAppClient(cleanSession).catch(err => {
+            console.error('Async initialization error:', err.message);
+        });
+        res.json({
+            success: true,
+            message: cleanSession
+                ? 'WhatsApp client session cleared. Fresh QR code generation initiated.'
+                : 'WhatsApp client restart initiated.'
+        });
     } catch (err) {
         console.error('Failed to trigger manual restart:', err.message);
         res.status(500).json({ error: err.message });
@@ -1866,7 +1572,10 @@ io.use((socket, next) => {
 io.on('connection', (socket) => {
     console.log(`Socket connected: ${socket.id}`);
 
-    // Send current states
+    // Broadcast complete state payload to newly connected socket
+    broadcastClientStatus(socket);
+
+    // Legacy individual socket events for backward compatibility
     if (whatsappClientReady) {
         socket.emit('ready');
     } else if (lastQrCodeData) {
