@@ -862,38 +862,52 @@ async function initializeWhatsAppClient(cleanAuthCache = false) {
 
         // 1. Check schedule-specific chatbots first
         if (scheduleConfig && Array.isArray(scheduleConfig.schedules)) {
+            debugLog(eventSource, `Evaluating ${scheduleConfig.schedules.length} schedules for chatbot rules. bodyForTrigger="${bodyForTrigger}"`);
             for (const sch of scheduleConfig.schedules) {
-                if (sch.enabled === false || sch.chatbotEnabled === false || sch.chatbotMode === 'off') continue;
+                debugLog(eventSource, `Schedule "${sch.name || sch.id}": enabled=${sch.enabled}, chatbotEnabled=${sch.chatbotEnabled}, chatbotMode=${sch.chatbotMode}, chatbotId=${sch.chatbotId}, chatbotRules=${JSON.stringify(sch.chatbotRules || [])}`);
+                if (sch.enabled === false || sch.chatbotEnabled === false || sch.chatbotMode === 'off') {
+                    debugLog(eventSource, `  -> SKIPPED (disabled or chatbot off)`);
+                    continue;
+                }
 
                 // Determine active rules for this schedule
                 let rulesToEvaluate = [];
                 if (sch.chatbotMode === 'custom' || (sch.chatbotRules && Array.isArray(sch.chatbotRules) && sch.chatbotRules.length > 0)) {
                     rulesToEvaluate = sch.chatbotRules || [];
+                    debugLog(eventSource, `  -> Using CUSTOM rules (${rulesToEvaluate.length} rules)`);
                 }
                 if (rulesToEvaluate.length === 0 && sch.chatbotId) {
                     const targetBot = (chatbotConfig.chatbots || []).find(b => b.id === sch.chatbotId);
+                    debugLog(eventSource, `  -> Looking up existing bot id="${sch.chatbotId}", found=${!!targetBot}, botName="${targetBot?.name}", botEnabled=${targetBot?.enabled}, rulesCount=${targetBot?.rules?.length}`);
                     if (targetBot && targetBot.enabled !== false && Array.isArray(targetBot.rules)) {
                         rulesToEvaluate = targetBot.rules;
                     }
                 }
 
-                if (rulesToEvaluate.length === 0) continue;
+                if (rulesToEvaluate.length === 0) {
+                    debugLog(eventSource, `  -> SKIPPED (no rules to evaluate)`);
+                    continue;
+                }
 
                 const schContacts = sch.contacts || [];
                 const isContactInSchedule = schContacts.length === 0 || schContacts.some(c => {
                     if (c.paused) return false;
                     const cRaw = (c.phone || '').split('|')[0].trim();
-                    return sameContactNumber(cRaw, resolvedFrom) ||
+                    const match = sameContactNumber(cRaw, resolvedFrom) ||
                            sameContactNumber(cRaw, msg.from) ||
                            sameContactNumber(cRaw, sender);
+                    if (match) debugLog(eventSource, `  -> Contact matched: cRaw="${cRaw}" matched resolvedFrom="${resolvedFrom}" or from="${msg.from}" or sender="${sender}"`);
+                    return match;
                 });
 
-                debugLog(eventSource, `Schedule "${sch.name}" evaluation: isContactInSchedule=${isContactInSchedule}, rulesCount=${rulesToEvaluate.length}`);
+                debugLog(eventSource, `Schedule "${sch.name}" evaluation: isContactInSchedule=${isContactInSchedule}, rulesCount=${rulesToEvaluate.length}, contacts=${JSON.stringify(schContacts.map(c => c.phone))}`);
 
                 if (isContactInSchedule) {
                     for (const rule of rulesToEvaluate) {
                         if (!rule.trigger || !rule.reply) continue;
-                        if (isTriggerMatch(rule.trigger, bodyForTrigger)) {
+                        const matched = isTriggerMatch(rule.trigger, bodyForTrigger);
+                        debugLog(eventSource, `  -> Rule trigger="${rule.trigger}" vs body="${bodyForTrigger}" => matched=${matched}`);
+                        if (matched) {
                             debugLog(eventSource, `SCHEDULE CHATBOT MATCHED "${bodyForTrigger}" (trigger: "${rule.trigger}") in schedule "${sch.name}". Replying: "${rule.reply}"`);
                             try {
                                 await msg.reply(rule.reply);
