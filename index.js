@@ -358,6 +358,37 @@ function isTargeted(jid) {
     return false;
 }
 
+function cleanDigits(str) {
+    return (str || '').replace(/[^0-9]/g, '');
+}
+
+function sameContactNumber(a, b) {
+    if (!a || !b) return false;
+    if (a === b) return true;
+    const digitsA = cleanDigits(a);
+    const digitsB = cleanDigits(b);
+    if (!digitsA || !digitsB) return false;
+    if (digitsA === digitsB) return true;
+    if (digitsA.length >= 7 && digitsB.length >= 7) {
+        return digitsA.slice(-7) === digitsB.slice(-7);
+    }
+    return false;
+}
+
+function isTriggerMatch(triggerConfig, incomingBody) {
+    if (!triggerConfig || !incomingBody) return false;
+    const incomingClean = incomingBody.trim().toLowerCase();
+    const incomingWords = incomingClean.replace(/[^\w\s\u0590-\u05FF]/gi, '').trim();
+    const triggers = triggerConfig.split(',').map(t => t.trim().toLowerCase()).filter(Boolean);
+    
+    return triggers.some(t => {
+        const cleanT = t.replace(/[^\w\s\u0590-\u05FF]/gi, '').trim();
+        if (incomingClean === t || incomingWords === cleanT) return true;
+        if (cleanT.length >= 2 && (incomingClean.includes(t) || incomingWords.includes(cleanT))) return true;
+        return false;
+    });
+}
+
 function logReply(phone, name, messageText) {
     const now = new Date();
     let yearStr, monthStr, dayKey, timeStr;
@@ -833,40 +864,39 @@ async function initializeWhatsAppClient(cleanAuthCache = false) {
 
                 // Determine active rules for this schedule
                 let rulesToEvaluate = [];
-                if (sch.chatbotMode === 'existing' && sch.chatbotId) {
+                if (sch.chatbotMode === 'custom' || (sch.chatbotRules && Array.isArray(sch.chatbotRules) && sch.chatbotRules.length > 0)) {
+                    rulesToEvaluate = sch.chatbotRules || [];
+                }
+                if (rulesToEvaluate.length === 0 && sch.chatbotId) {
                     const targetBot = (chatbotConfig.chatbots || []).find(b => b.id === sch.chatbotId);
                     if (targetBot && targetBot.enabled !== false && Array.isArray(targetBot.rules)) {
                         rulesToEvaluate = targetBot.rules;
                     }
-                } else if (sch.chatbotRules && Array.isArray(sch.chatbotRules)) {
-                    rulesToEvaluate = sch.chatbotRules;
                 }
 
                 if (rulesToEvaluate.length === 0) continue;
 
                 const schContacts = sch.contacts || [];
-                const isContactInSchedule = schContacts.some(c => {
+                const isContactInSchedule = schContacts.length === 0 || schContacts.some(c => {
                     if (c.paused) return false;
                     const cRaw = (c.phone || '').split('|')[0].trim();
-                    const cPhone = cRaw.split('@')[0];
-                    const rPhone = resolvedFrom.split('@')[0];
-                    const sPhone = sender.split('@')[0];
-                    const fPhone = msg.from.split('@')[0];
-                    return cRaw === resolvedFrom || cRaw === msg.from || cRaw === sender ||
-                           (cPhone && (cPhone === rPhone || cPhone === sPhone || cPhone === fPhone));
+                    return sameContactNumber(cRaw, resolvedFrom) ||
+                           sameContactNumber(cRaw, msg.from) ||
+                           sameContactNumber(cRaw, sender);
                 });
+
+                debugLog(eventSource, `Schedule "${sch.name}" evaluation: isContactInSchedule=${isContactInSchedule}, rulesCount=${rulesToEvaluate.length}`);
 
                 if (isContactInSchedule) {
                     for (const rule of rulesToEvaluate) {
                         if (!rule.trigger || !rule.reply) continue;
-                        const triggers = rule.trigger.split(',').map(t => t.trim().toLowerCase());
-                        if (triggers.includes(incomingText)) {
-                            debugLog(eventSource, `SCHEDULE CHATBOT MATCHED "${incomingText}" in schedule "${sch.name}". Replying: "${rule.reply}"`);
+                        if (isTriggerMatch(rule.trigger, bodyForTrigger)) {
+                            debugLog(eventSource, `SCHEDULE CHATBOT MATCHED "${bodyForTrigger}" (trigger: "${rule.trigger}") in schedule "${sch.name}". Replying: "${rule.reply}"`);
                             try {
                                 await msg.reply(rule.reply);
                                 debugLog(eventSource, `Schedule auto-reply sent successfully!`);
                                 io.emit('automation_log', {
-                                    message: `🤖 [Schedule: ${sch.name || 'Schedule'}] Auto-replied to ${displayName} (Matched: "${incomingText}") -> "${rule.reply}"`,
+                                    message: `🤖 [Schedule: ${sch.name || 'Schedule'}] Auto-replied to ${displayName} (Matched: "${bodyForTrigger}") -> "${rule.reply}"`,
                                     type: 'success'
                                 });
                             } catch (err) {
@@ -887,26 +917,24 @@ async function initializeWhatsAppClient(cleanAuthCache = false) {
 
         // 2. Global Chatbot fallback if no schedule rule matched
         if (!scheduleAutoReplied && chatbotConfig && Array.isArray(chatbotConfig.chatbots)) {
-            // Find global default chatbot or first enabled chatbot
             const defaultBot = chatbotConfig.chatbots.find(b => b.isDefault && b.enabled !== false) ||
                                chatbotConfig.chatbots.find(b => b.enabled !== false);
 
             if (defaultBot && Array.isArray(defaultBot.rules) && defaultBot.rules.length > 0) {
-                debugLog(eventSource, `Global chatbot "${defaultBot.name}" ENABLED. Checking ${defaultBot.rules.length} rules against: "${incomingText}"`);
+                debugLog(eventSource, `Global chatbot "${defaultBot.name}" ENABLED. Checking ${defaultBot.rules.length} rules against: "${bodyForTrigger}"`);
 
                 for (const rule of defaultBot.rules) {
                     if (!rule.trigger || !rule.reply) continue;
 
-                    const triggers = rule.trigger.split(',').map(t => t.trim().toLowerCase());
-                    if (triggers.includes(incomingText)) {
-                        debugLog(eventSource, `GLOBAL TRIGGER MATCHED "${incomingText}". Replying: "${rule.reply}"`);
+                    if (isTriggerMatch(rule.trigger, bodyForTrigger)) {
+                        debugLog(eventSource, `GLOBAL TRIGGER MATCHED "${bodyForTrigger}" (trigger: "${rule.trigger}"). Replying: "${rule.reply}"`);
 
                         try {
                             await msg.reply(rule.reply);
                             debugLog(eventSource, `Auto-reply sent successfully!`);
 
                             io.emit('automation_log', { 
-                                message: `🤖 [Chatbot: ${defaultBot.name}] Auto-replied to ${displayName} (Matched: "${incomingText}") -> "${rule.reply}"`, 
+                                message: `🤖 [Chatbot: ${defaultBot.name}] Auto-replied to ${displayName} (Matched: "${bodyForTrigger}") -> "${rule.reply}"`, 
                                 type: 'success' 
                             });
                         } catch (err) {
