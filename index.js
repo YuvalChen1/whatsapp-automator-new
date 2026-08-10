@@ -860,72 +860,86 @@ async function initializeWhatsAppClient(cleanAuthCache = false) {
 
         let scheduleAutoReplied = false;
 
-        // 1. Check schedule-specific chatbots first
+        // 1. Check schedule-specific chatbots first (sorted by specificity, custom bot priority, and recency)
         if (scheduleConfig && Array.isArray(scheduleConfig.schedules)) {
-            debugLog(eventSource, `Evaluating ${scheduleConfig.schedules.length} schedules for chatbot rules. bodyForTrigger="${bodyForTrigger}"`);
-            for (const sch of scheduleConfig.schedules) {
-                debugLog(eventSource, `Schedule "${sch.name || sch.id}": enabled=${sch.enabled}, chatbotEnabled=${sch.chatbotEnabled}, chatbotMode=${sch.chatbotMode}, chatbotId=${sch.chatbotId}, chatbotRules=${JSON.stringify(sch.chatbotRules || [])}`);
-                if (sch.enabled === false || sch.chatbotEnabled === false || sch.chatbotMode === 'off') {
-                    debugLog(eventSource, `  -> SKIPPED (disabled or chatbot off)`);
-                    continue;
-                }
+            const activeSchedules = scheduleConfig.schedules.filter(sch => {
+                return sch.enabled !== false && sch.chatbotEnabled !== false && sch.chatbotMode && sch.chatbotMode !== 'off';
+            });
+
+            debugLog(eventSource, `Evaluating ${activeSchedules.length} active schedules with chatbots enabled out of ${scheduleConfig.schedules.length} total. bodyForTrigger="${bodyForTrigger}"`);
+
+            const scoredSchedules = [];
+
+            for (let i = 0; i < activeSchedules.length; i++) {
+                const sch = activeSchedules[i];
 
                 // Determine active rules for this schedule
                 let rulesToEvaluate = [];
                 if (sch.chatbotMode === 'custom' || (sch.chatbotRules && Array.isArray(sch.chatbotRules) && sch.chatbotRules.length > 0)) {
                     rulesToEvaluate = sch.chatbotRules || [];
-                    debugLog(eventSource, `  -> Using CUSTOM rules (${rulesToEvaluate.length} rules)`);
                 }
                 if (rulesToEvaluate.length === 0 && sch.chatbotId) {
                     const targetBot = (chatbotConfig.chatbots || []).find(b => b.id === sch.chatbotId);
-                    debugLog(eventSource, `  -> Looking up existing bot id="${sch.chatbotId}", found=${!!targetBot}, botName="${targetBot?.name}", botEnabled=${targetBot?.enabled}, rulesCount=${targetBot?.rules?.length}`);
                     if (targetBot && targetBot.enabled !== false && Array.isArray(targetBot.rules)) {
                         rulesToEvaluate = targetBot.rules;
                     }
                 }
 
-                if (rulesToEvaluate.length === 0) {
-                    debugLog(eventSource, `  -> SKIPPED (no rules to evaluate)`);
-                    continue;
-                }
+                if (rulesToEvaluate.length === 0) continue;
 
                 const schContacts = sch.contacts || [];
+                let explicitContactMatch = false;
                 const isContactInSchedule = schContacts.length === 0 || schContacts.some(c => {
                     if (c.paused) return false;
                     const cRaw = (c.phone || '').split('|')[0].trim();
                     const match = sameContactNumber(cRaw, resolvedFrom) ||
                            sameContactNumber(cRaw, msg.from) ||
                            sameContactNumber(cRaw, sender);
-                    if (match) debugLog(eventSource, `  -> Contact matched: cRaw="${cRaw}" matched resolvedFrom="${resolvedFrom}" or from="${msg.from}" or sender="${sender}"`);
+                    if (match) explicitContactMatch = true;
                     return match;
                 });
 
-                debugLog(eventSource, `Schedule "${sch.name}" evaluation: isContactInSchedule=${isContactInSchedule}, rulesCount=${rulesToEvaluate.length}, contacts=${JSON.stringify(schContacts.map(c => c.phone))}`);
+                if (!isContactInSchedule) continue;
 
-                if (isContactInSchedule) {
-                    for (const rule of rulesToEvaluate) {
-                        if (!rule.trigger || !rule.reply) continue;
-                        const matched = isTriggerMatch(rule.trigger, bodyForTrigger);
-                        debugLog(eventSource, `  -> Rule trigger="${rule.trigger}" vs body="${bodyForTrigger}" => matched=${matched}`);
-                        if (matched) {
-                            debugLog(eventSource, `SCHEDULE CHATBOT MATCHED "${bodyForTrigger}" (trigger: "${rule.trigger}") in schedule "${sch.name}". Replying: "${rule.reply}"`);
-                            try {
-                                await msg.reply(rule.reply);
-                                debugLog(eventSource, `Schedule auto-reply sent successfully!`);
-                                io.emit('automation_log', {
-                                    message: `🤖 [Schedule: ${sch.name || 'Schedule'}] Auto-replied to ${displayName} (Matched: "${bodyForTrigger}") -> "${rule.reply}"`,
-                                    type: 'success'
-                                });
-                            } catch (err) {
-                                debugLog(eventSource, `FAILED to send schedule auto-reply: ${err.message}`);
-                                io.emit('automation_log', {
-                                    message: `⚠️ Failed to send schedule auto-reply to ${displayName}: ${err.message}`,
-                                    type: 'error'
-                                });
-                            }
-                            scheduleAutoReplied = true;
-                            break;
+                // Score schedule for priority:
+                // +100 for explicit contact match
+                // +50 for custom rules or specific linked chatbot
+                // +i for recency (newer schedules have higher index)
+                const isCustomOrSpecific = sch.chatbotMode === 'custom' || (sch.chatbotId && sch.chatbotId !== 'bot-default');
+                const score = (explicitContactMatch ? 100 : 0) + (isCustomOrSpecific ? 50 : 0) + i;
+
+                scoredSchedules.push({ sch, rulesToEvaluate, score, explicitContactMatch });
+            }
+
+            // Sort descending by priority score so highest priority schedule evaluates first
+            scoredSchedules.sort((a, b) => b.score - a.score);
+
+            for (const item of scoredSchedules) {
+                const { sch, rulesToEvaluate } = item;
+                debugLog(eventSource, `Evaluating schedule "${sch.name}" (score=${item.score}, rulesCount=${rulesToEvaluate.length}) against body="${bodyForTrigger}"`);
+
+                for (const rule of rulesToEvaluate) {
+                    if (!rule.trigger || !rule.reply) continue;
+                    const matched = isTriggerMatch(rule.trigger, bodyForTrigger);
+                    debugLog(eventSource, ` -> Rule trigger="${rule.trigger}" vs body="${bodyForTrigger}" => matched=${matched}`);
+                    if (matched) {
+                        debugLog(eventSource, `SCHEDULE CHATBOT MATCHED "${bodyForTrigger}" (trigger: "${rule.trigger}") in schedule "${sch.name}". Replying: "${rule.reply}"`);
+                        try {
+                            await msg.reply(rule.reply);
+                            debugLog(eventSource, `Schedule auto-reply sent successfully!`);
+                            io.emit('automation_log', {
+                                message: `🤖 [Schedule: ${sch.name || 'Schedule'}] Auto-replied to ${displayName} (Matched: "${bodyForTrigger}") -> "${rule.reply}"`,
+                                type: 'success'
+                            });
+                        } catch (err) {
+                            debugLog(eventSource, `FAILED to send schedule auto-reply: ${err.message}`);
+                            io.emit('automation_log', {
+                                message: `⚠️ Failed to send schedule auto-reply to ${displayName}: ${err.message}`,
+                                type: 'error'
+                            });
                         }
+                        scheduleAutoReplied = true;
+                        break;
                     }
                 }
                 if (scheduleAutoReplied) break;
