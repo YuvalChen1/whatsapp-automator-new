@@ -875,13 +875,17 @@ async function initializeWhatsAppClient(cleanAuthCache = false) {
 
                 // Determine active rules for this schedule
                 let rulesToEvaluate = [];
-                if (sch.chatbotMode === 'custom' || (sch.chatbotRules && Array.isArray(sch.chatbotRules) && sch.chatbotRules.length > 0)) {
+                if (sch.chatbotMode === 'custom') {
                     rulesToEvaluate = sch.chatbotRules || [];
-                }
-                if (rulesToEvaluate.length === 0 && sch.chatbotId) {
-                    const targetBot = (chatbotConfig.chatbots || []).find(b => b.id === sch.chatbotId);
-                    if (targetBot && targetBot.enabled !== false && Array.isArray(targetBot.rules)) {
-                        rulesToEvaluate = targetBot.rules;
+                } else if (sch.chatbotMode === 'existing' || !sch.chatbotMode) {
+                    if (sch.chatbotId) {
+                        const targetBot = (chatbotConfig.chatbots || []).find(b => b.id === sch.chatbotId);
+                        if (targetBot && targetBot.enabled !== false && Array.isArray(targetBot.rules)) {
+                            rulesToEvaluate = targetBot.rules;
+                        }
+                    }
+                    if (rulesToEvaluate.length === 0 && sch.chatbotRules && Array.isArray(sch.chatbotRules) && sch.chatbotRules.length > 0) {
+                        rulesToEvaluate = sch.chatbotRules;
                     }
                 }
 
@@ -1818,8 +1822,11 @@ app.get('/api/contacts', async (req, res) => {
     }
 });
 
+const automationQueue = [];
+let isAutomationRunning = false;
+
 // Function to run the automation loop
-async function runAutomation(contacts, messageBody = null, minDelay = 6, maxDelay = 12, isScheduled = false) {
+async function runAutomation(contacts, messageBody = null, minDelay = 6, maxDelay = 12, isScheduled = false, scheduleName = '') {
     if (!whatsappClientReady) {
         const errMsg = 'Automation failed to trigger: WhatsApp client is offline.';
         console.error(errMsg);
@@ -1827,102 +1834,117 @@ async function runAutomation(contacts, messageBody = null, minDelay = 6, maxDela
         return;
     }
 
-    if (activeAutomation) {
-        const warnMsg = 'Automation trigger skipped: Another process is already running.';
-        console.warn(warnMsg);
-        io.emit('automation_log', { message: warnMsg, type: 'warning' });
+    if (isAutomationRunning) {
+        const queueMsg = `⏰ Schedule ${scheduleName ? '"' + scheduleName + '" ' : ''}queued. Will start automatically after current process finishes.`;
+        console.log(queueMsg);
+        io.emit('automation_log', { message: queueMsg, type: 'info' });
+        automationQueue.push({ contacts, messageBody, minDelay, maxDelay, isScheduled, scheduleName });
         return;
     }
 
-    console.log(`Starting ${isScheduled ? 'scheduled' : 'manual'} automation for ${contacts.length} contacts...`);
-    io.emit('automation_start', contacts.length);
-    
-    activeAutomation = {
-        total: contacts.length,
-        current: 0,
-        sent: 0,
-        failed: 0
-    };
-    shouldStopAutomation = false;
-
-    const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-
-    for (let i = 0; i < contacts.length; i++) {
-        if (shouldStopAutomation) {
-            io.emit('automation_log', { message: 'Automation stopped.', type: 'warning' });
-            break;
-        }
-
-        const contact = contacts[i];
-        const rawPhone = contact.phone.toString().trim();
-        const name = contact.name || 'Recipient';
-        const message = contact.message || messageBody || 'Hello!';
-
-        let whatsappId;
-        let logPhone = rawPhone;
+    isAutomationRunning = true;
+    try {
+        console.log(`Starting ${isScheduled ? 'scheduled' : 'manual'} automation for ${contacts.length} contacts (${scheduleName || 'Manual'})...`);
+        io.emit('automation_start', contacts.length);
         
-        if (rawPhone.endsWith('@g.us')) {
-            whatsappId = rawPhone;
-            logPhone = `Group: ${name}`;
-        } else if (rawPhone.endsWith('@c.us') || rawPhone.endsWith('@lid')) {
-            whatsappId = rawPhone;
-            logPhone = rawPhone.split('@')[0];
-        } else {
-            const cleanPhone = rawPhone.replace(/[^0-9]/g, '');
-            whatsappId = `${cleanPhone}@c.us`;
-            logPhone = cleanPhone;
-        }
+        activeAutomation = {
+            total: contacts.length,
+            current: 0,
+            sent: 0,
+            failed: 0
+        };
+        shouldStopAutomation = false;
 
-        io.emit('automation_log', { message: `[${i + 1}/${contacts.length}] Sending to ${name} (${logPhone})...`, type: 'info' });
-        activeAutomation.current++;
+        const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-        try {
-            let canSend = true;
-            if (!whatsappId.endsWith('@g.us') && !whatsappId.endsWith('@lid')) {
-                const isRegistered = await client.isRegisteredUser(whatsappId);
-                if (!isRegistered) {
-                    canSend = false;
-                    activeAutomation.failed++;
-                    io.emit('automation_log', { message: `Skipped: ${logPhone} is not on WhatsApp.`, type: 'warning' });
-                }
+        for (let i = 0; i < contacts.length; i++) {
+            if (shouldStopAutomation) {
+                io.emit('automation_log', { message: 'Automation stopped.', type: 'warning' });
+                automationQueue.length = 0;
+                break;
             }
 
-            if (canSend) {
-                const sentMsg = await client.sendMessage(whatsappId, message);
-                activeAutomation.sent++;
-                io.emit('automation_log', { message: `Success: Message sent to ${name}.`, type: 'success' });
-                recordTargetedContact(whatsappId);
-                
-                // Also record the recipient's LID (WhatsApp's new internal ID format)
-                // so that incoming replies from their @lid address match directly
-                if (sentMsg && sentMsg.to) {
-                    debugLog('AUTOMATION', `Sent message to ${whatsappId}, recipient LID: ${sentMsg.to}`);
-                    recordTargetedContact(sentMsg.to);
-                }
+            const contact = contacts[i];
+            const rawPhone = contact.phone.toString().trim();
+            const name = contact.name || 'Recipient';
+            const message = contact.message || messageBody || 'Hello!';
+
+            let whatsappId;
+            let logPhone = rawPhone;
+            
+            if (rawPhone.endsWith('@g.us')) {
+                whatsappId = rawPhone;
+                logPhone = `Group: ${name}`;
+            } else if (rawPhone.endsWith('@c.us') || rawPhone.endsWith('@lid')) {
+                whatsappId = rawPhone;
+                logPhone = rawPhone.split('@')[0];
+            } else {
+                const cleanPhone = rawPhone.replace(/[^0-9]/g, '');
+                whatsappId = `${cleanPhone}@c.us`;
+                logPhone = cleanPhone;
             }
-        } catch (err) {
-            activeAutomation.failed++;
-            io.emit('automation_log', { message: `Failed to send to ${name}: ${err.message}`, type: 'error' });
+
+            io.emit('automation_log', { message: `[${i + 1}/${contacts.length}] Sending to ${name} (${logPhone})...`, type: 'info' });
+            activeAutomation.current++;
+
+            try {
+                let canSend = true;
+                if (!whatsappId.endsWith('@g.us') && !whatsappId.endsWith('@lid')) {
+                    const isRegistered = await client.isRegisteredUser(whatsappId);
+                    if (!isRegistered) {
+                        canSend = false;
+                        activeAutomation.failed++;
+                        io.emit('automation_log', { message: `Skipped: ${logPhone} is not on WhatsApp.`, type: 'warning' });
+                    }
+                }
+
+                if (canSend) {
+                    const sentMsg = await client.sendMessage(whatsappId, message);
+                    activeAutomation.sent++;
+                    io.emit('automation_log', { message: `Success: Message sent to ${name}.`, type: 'success' });
+                    recordTargetedContact(whatsappId);
+                    
+                    if (sentMsg && sentMsg.to) {
+                        debugLog('AUTOMATION', `Sent message to ${whatsappId}, recipient LID: ${sentMsg.to}`);
+                        recordTargetedContact(sentMsg.to);
+                    }
+                }
+            } catch (err) {
+                activeAutomation.failed++;
+                io.emit('automation_log', { message: `Failed to send to ${name}: ${err.message}`, type: 'error' });
+            }
+
+            // Update client stats
+            io.emit('automation_progress', activeAutomation);
+
+            // Wait with a random delay if not the last item
+            if (i < contacts.length - 1 && !shouldStopAutomation) {
+                const minMs = minDelay * 1000;
+                const maxMs = maxDelay * 1000;
+                const delayTime = Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs;
+                io.emit('automation_log', { message: `Waiting ${delayTime / 1000}s...`, type: 'system' });
+                await delay(delayTime);
+            }
         }
 
-        // Update client stats
-        io.emit('automation_progress', activeAutomation);
+        io.emit('automation_end', {
+            sent: activeAutomation.sent,
+            failed: activeAutomation.failed
+        });
+    } finally {
+        activeAutomation = null;
+        isAutomationRunning = false;
 
-        // Wait with a random delay if not the last item
-        if (i < contacts.length - 1 && !shouldStopAutomation) {
-            const minMs = minDelay * 1000;
-            const maxMs = maxDelay * 1000;
-            const delayTime = Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs;
-            io.emit('automation_log', { message: `Waiting ${delayTime / 1000}s...`, type: 'system' });
-            await delay(delayTime);
+        // Process next item in queue if available
+        if (automationQueue.length > 0 && !shouldStopAutomation) {
+            const nextJob = automationQueue.shift();
+            console.log(`Processing queued automation schedule: "${nextJob.scheduleName}" (${automationQueue.length} remaining in queue)...`);
+            io.emit('automation_log', { message: `⏰ Starting queued schedule "${nextJob.scheduleName}" (${automationQueue.length} remaining in queue)...`, type: 'system' });
+            setTimeout(() => {
+                runAutomation(nextJob.contacts, nextJob.messageBody, nextJob.minDelay, nextJob.maxDelay, nextJob.isScheduled, nextJob.scheduleName);
+            }, 1000);
         }
     }
-
-    io.emit('automation_end', {
-        sent: activeAutomation.sent,
-        failed: activeAutomation.failed
-    });
-    activeAutomation = null;
 }
 
 // Manage Cron Jobs based on scheduleConfig
@@ -1973,7 +1995,7 @@ function applySchedule() {
                 if (schedule.contacts && schedule.contacts.length > 0) {
                     const activeContacts = schedule.contacts.filter(c => !c.paused);
                     if (activeContacts.length > 0) {
-                        runAutomation(activeContacts, schedule.message, 6, 12, true);
+                        runAutomation(activeContacts, schedule.message, 6, 12, true, schedule.name || 'Unnamed');
                     } else {
                         io.emit('automation_log', { message: `⏰ Schedule "${schedule.name || 'Unnamed'}" triggered, but all contacts are currently paused!`, type: 'system' });
                     }
