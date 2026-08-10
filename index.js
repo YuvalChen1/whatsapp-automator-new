@@ -1893,34 +1893,40 @@ function applySchedule() {
         const minute = parseInt(minuteStr, 10);
 
         if (isNaN(hour) || isNaN(minute)) {
-            console.error(`Invalid schedule time formatted in schedule: ${schedule.name || 'Unnamed'}`);
+            console.error(`Invalid schedule time format in schedule "${schedule.name || 'Unnamed'}": ${schedule.time}`);
             return;
         }
 
         const cronExpression = `${minute} ${hour} * * *`;
-        const tz = schedule.timezone || 'UTC';
-        console.log(`Scheduling daily cron job for "${schedule.name || 'Unnamed'}": ${cronExpression} (at ${schedule.time} in timezone ${tz})`);
+        let tz = schedule.timezone || 'Asia/Jerusalem';
+        if (tz === 'Local') tz = undefined; // 'Local' is invalid IANA string for node-cron
 
-        const job = cron.schedule(cronExpression, () => {
-            console.log(`Scheduled automation "${schedule.name || 'Unnamed'}" triggered!`);
-            io.emit('automation_log', { message: `⏰ Scheduled automation "${schedule.name || 'Unnamed'}" triggered!`, type: 'system' });
-            
-            if (schedule.contacts && schedule.contacts.length > 0) {
-                const activeContacts = schedule.contacts.filter(c => !c.paused);
-                if (activeContacts.length > 0) {
-                    runAutomation(activeContacts, schedule.message, 6, 12, true);
+        console.log(`Scheduling daily cron job for "${schedule.name || 'Unnamed'}": ${cronExpression} (at ${schedule.time} in timezone ${tz || 'Server Local'})`);
+
+        try {
+            const cronOptions = { scheduled: true };
+            if (tz) cronOptions.timezone = tz;
+
+            const job = cron.schedule(cronExpression, () => {
+                console.log(`Scheduled automation "${schedule.name || 'Unnamed'}" triggered!`);
+                io.emit('automation_log', { message: `⏰ Scheduled automation "${schedule.name || 'Unnamed'}" triggered!`, type: 'system' });
+                
+                if (schedule.contacts && schedule.contacts.length > 0) {
+                    const activeContacts = schedule.contacts.filter(c => !c.paused);
+                    if (activeContacts.length > 0) {
+                        runAutomation(activeContacts, schedule.message, 6, 12, true);
+                    } else {
+                        io.emit('automation_log', { message: `⏰ Schedule "${schedule.name || 'Unnamed'}" triggered, but all contacts are currently paused!`, type: 'system' });
+                    }
                 } else {
-                    io.emit('automation_log', { message: `⏰ Schedule "${schedule.name || 'Unnamed'}" triggered, but all contacts are currently paused!`, type: 'system' });
+                    io.emit('automation_log', { message: `Schedule "${schedule.name || 'Unnamed'}" triggered, but contacts list is empty!`, type: 'error' });
                 }
-            } else {
-                io.emit('automation_log', { message: `Schedule "${schedule.name || 'Unnamed'}" triggered, but contacts list is empty!`, type: 'error' });
-            }
-        }, {
-            scheduled: true,
-            timezone: tz
-        });
+            }, cronOptions);
 
-        activeCronJobs.set(schedule.id, job);
+            activeCronJobs.set(schedule.id, job);
+        } catch (err) {
+            console.error(`Failed to register cron job for schedule "${schedule.name || 'Unnamed'}":`, err.message);
+        }
     });
 }
 

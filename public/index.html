@@ -2008,7 +2008,12 @@
                 document.getElementById('edit-schedule-id').value = '';
                 document.getElementById('schedule-name').value = '';
                 document.getElementById('schedule-time').value = getIsraelTimeStr();
-                document.getElementById('schedule-timezone').value = 'UTC';
+                let userTz = 'Asia/Jerusalem';
+                try {
+                    const detected = Intl.DateTimeFormat().resolvedOptions().timeZone;
+                    if (detected) userTz = detected;
+                } catch (e) {}
+                document.getElementById('schedule-timezone').value = userTz;
                 document.getElementById('schedule-enabled').checked = true;
                 document.getElementById('schedule-message').value = '';
                 document.getElementById('schedule-message-length').textContent = '0 chars';
@@ -2339,9 +2344,8 @@
                     <div class="form-group">
                         <label for="schedule-timezone" style="font-weight: 500; margin-bottom: 0.5rem; display: block; font-size: 0.85rem; color: var(--text-primary);" data-i18n="timezoneLabel">Timezone</label>
                         <select id="schedule-timezone" style="width: 100%; padding: 0.75rem; background: rgba(0, 0, 0, 0.3); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-primary); outline: none; font-size: 0.9rem; height: 45px;">
-                            <option value="UTC">UTC</option>
-                            <option value="Local">Local (Server Time)</option>
                             <option value="Asia/Jerusalem">Israel (Asia/Jerusalem)</option>
+                            <option value="UTC">UTC</option>
                             <option value="America/New_York">EST (New York)</option>
                             <option value="Europe/London">GMT (London)</option>
                         </select>
