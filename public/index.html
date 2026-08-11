@@ -1838,6 +1838,87 @@
             closeContactModal();
         }
 
+        // === POLL UI HELPERS ===
+        function setMessageType(type) {
+            document.getElementById('schedule-message-type').value = type;
+            const textSection = document.getElementById('schedule-text-section');
+            const pollSection = document.getElementById('schedule-poll-section');
+            const textBtn = document.getElementById('msg-type-text-btn');
+            const pollBtn = document.getElementById('msg-type-poll-btn');
+
+            if (type === 'poll') {
+                textSection.style.display = 'none';
+                pollSection.style.display = 'block';
+                textBtn.style.background = 'transparent';
+                textBtn.style.color = 'var(--text-secondary)';
+                textBtn.style.borderColor = 'var(--border-color)';
+                pollBtn.style.background = 'var(--primary)';
+                pollBtn.style.color = 'white';
+                pollBtn.style.borderColor = 'var(--primary)';
+
+                // Ensure at least 2 options
+                const container = document.getElementById('schedule-poll-options-container');
+                if (container && container.children.length < 2) {
+                    while (container.children.length < 2) {
+                        addPollOptionRow();
+                    }
+                }
+            } else {
+                textSection.style.display = 'block';
+                pollSection.style.display = 'none';
+                textBtn.style.background = 'var(--primary)';
+                textBtn.style.color = 'white';
+                textBtn.style.borderColor = 'var(--primary)';
+                pollBtn.style.background = 'transparent';
+                pollBtn.style.color = 'var(--text-secondary)';
+                pollBtn.style.borderColor = 'var(--border-color)';
+            }
+        }
+
+        function addPollOptionRow(label = '', triggerValue = '') {
+            const container = document.getElementById('schedule-poll-options-container');
+            if (!container) return;
+            if (container.children.length >= 12) {
+                alert('Maximum 12 poll options allowed.');
+                return;
+            }
+
+            const optId = 'poll-opt-' + Math.random().toString(36).substr(2, 9);
+            const optNum = container.children.length + 1;
+            const row = document.createElement('div');
+            row.className = 'poll-option-row';
+            row.id = optId;
+            row.style.cssText = 'display: flex; gap: 0.4rem; align-items: center;';
+            row.innerHTML = `
+                <span style="color: var(--text-secondary); font-size: 0.78rem; font-weight: 600; min-width: 20px; text-align: center;">${optNum}</span>
+                <input type="text" class="poll-option-label" placeholder="Option label (what workers see)" value="${escapeHtml(label)}" style="flex: 4; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 8px; padding: 0.5rem 0.75rem; color: var(--text-primary); font-size: 0.85rem; outline: none; box-sizing: border-box;">
+                <input type="text" class="poll-option-trigger" placeholder="Trigger value (for chatbot)" value="${escapeHtml(triggerValue)}" style="flex: 3; background: rgba(0,0,0,0.3); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 8px; padding: 0.5rem 0.75rem; color: #f59e0b; font-size: 0.85rem; outline: none; box-sizing: border-box;">
+                <button class="btn btn-danger btn-sm" type="button" onclick="removePollOption('${optId}')" style="padding: 0.5rem 0.6rem; flex-shrink: 0;" title="Remove option"><i class="fas fa-trash"></i></button>
+            `;
+            container.appendChild(row);
+        }
+
+        function removePollOption(optId) {
+            const container = document.getElementById('schedule-poll-options-container');
+            if (!container) return;
+            if (container.children.length <= 2) {
+                alert('A poll must have at least 2 options.');
+                return;
+            }
+            const el = document.getElementById(optId);
+            if (el) el.remove();
+            // Re-number
+            Array.from(container.children).forEach((row, idx) => {
+                const numSpan = row.querySelector('span');
+                if (numSpan) numSpan.textContent = idx + 1;
+            });
+        }
+
+        function clearPollOptions() {
+            const container = document.getElementById('schedule-poll-options-container');
+            if (container) container.innerHTML = '';
+        }
+
         function addScheduleRuleRow(triggerVal = '', replyVal = '') {
             const container = document.getElementById('schedule-chatbot-rules-container');
             if (!container) return;
@@ -1968,6 +2049,7 @@
             document.getElementById('schedule-modal').style.display = 'flex';
             const rulesContainer = document.getElementById('schedule-chatbot-rules-container');
             if (rulesContainer) rulesContainer.innerHTML = '';
+            clearPollOptions();
             populateScheduleChatbotDropdown();
             
             if (scheduleId) {
@@ -2000,6 +2082,23 @@
                         addScheduleRuleRow();
                     }
                     toggleScheduleChatbotMode();
+
+                    // Restore poll settings
+                    if (schedule.messageType === 'poll') {
+                        setMessageType('poll');
+                        document.getElementById('schedule-poll-question').value = schedule.pollQuestion || '';
+                        if (schedule.pollOptions && Array.isArray(schedule.pollOptions)) {
+                            schedule.pollOptions.forEach(opt => addPollOptionRow(opt.label || '', opt.triggerValue || ''));
+                        }
+                        if (document.getElementById('schedule-poll-options-container').children.length < 2) {
+                            while (document.getElementById('schedule-poll-options-container').children.length < 2) {
+                                addPollOptionRow();
+                            }
+                        }
+                    } else {
+                        setMessageType('text');
+                        document.getElementById('schedule-poll-question').value = '';
+                    }
                 }
             } else {
                 // Create Mode
@@ -2023,6 +2122,10 @@
                 document.getElementById('schedule-chatbot-mode').value = 'existing';
                 addScheduleRuleRow();
                 toggleScheduleChatbotMode();
+
+                // Reset poll state
+                setMessageType('text');
+                document.getElementById('schedule-poll-question').value = '';
             }
         }
 
@@ -2053,6 +2156,25 @@
                 });
             }
 
+            // Collect poll options if poll mode
+            const messageType = document.getElementById('schedule-message-type').value;
+            const pollQuestion = document.getElementById('schedule-poll-question').value.trim();
+            const pollOptions = [];
+            if (messageType === 'poll') {
+                const optRows = document.getElementById('schedule-poll-options-container').querySelectorAll('.poll-option-row');
+                optRows.forEach(row => {
+                    const label = row.querySelector('.poll-option-label').value.trim();
+                    const triggerValue = row.querySelector('.poll-option-trigger').value.trim();
+                    if (label) {
+                        pollOptions.push({ label, triggerValue: triggerValue || label });
+                    }
+                });
+                if (pollOptions.length < 2) {
+                    alert('A poll must have at least 2 options with labels.');
+                    return;
+                }
+            }
+
             const scheduleData = {
                 id: id || 'sch-' + Date.now(),
                 name,
@@ -2060,6 +2182,9 @@
                 timezone,
                 enabled,
                 message,
+                messageType,
+                pollQuestion: messageType === 'poll' ? pollQuestion : null,
+                pollOptions: messageType === 'poll' ? pollOptions : null,
                 contacts: activeScheduleContactsList,
                 chatbotMode,
                 chatbotId: chatbotMode === 'existing' ? chatbotId : null,
@@ -2159,6 +2284,10 @@
                     ? `<span style="color: #10b981;"><i class="fas fa-robot"></i> ${chatbotBadgeText}</span>`
                     : `<span style="color: var(--text-secondary);"><i class="fas fa-robot"></i> ${chatbotBadgeText}</span>`;
 
+                const pollBadge = schedule.messageType === 'poll'
+                    ? `<span style="color: #8b5cf6;"><i class="fas fa-poll"></i> Poll</span>`
+                    : '';
+
                 card.innerHTML = `
                     <div>
                         <div class="schedule-card-header">
@@ -2170,6 +2299,7 @@
                         </div>
                         <div class="schedule-card-meta" style="margin-top: 0.5rem; display: flex; gap: 1rem; flex-wrap: wrap;">
                             <span><i class="fas fa-users"></i> ${targetsMeta}</span>
+                            ${pollBadge}
                             ${chatbotBadge}
                         </div>
                     </div>
@@ -2338,15 +2468,52 @@
                     </div>
                 </div>
 
-                <!-- Broadcast Message Section -->
+                <!-- Message Type Toggle -->
                 <div class="form-group" style="background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-color); border-radius: 10px; padding: 1rem;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
-                        <label for="schedule-message" style="font-weight: 500; font-size: 0.85rem; color: var(--text-primary); display: flex; align-items: center; gap: 0.4rem;" data-i18n="defaultMsgLabel">
-                            <i class="fas fa-paper-plane" style="color: #10b981;"></i> Broadcast Message
-                        </label>
-                        <span id="schedule-message-length" style="font-size: 0.72rem; color: var(--text-secondary);">0 chars</span>
+                    <label style="font-weight: 500; font-size: 0.85rem; color: var(--text-primary); display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.75rem;">
+                        <i class="fas fa-envelope" style="color: #8b5cf6;"></i> Message Type
+                    </label>
+                    <div style="display: flex; gap: 0.5rem; margin-bottom: 0.75rem;">
+                        <button type="button" id="msg-type-text-btn" class="btn btn-sm" style="flex: 1; padding: 0.6rem; font-size: 0.82rem; border-radius: 8px; transition: all 0.2s; background: var(--primary); color: white; border: 1px solid var(--primary);" onclick="setMessageType('text')">
+                            <i class="fas fa-paper-plane"></i> Text Message
+                        </button>
+                        <button type="button" id="msg-type-poll-btn" class="btn btn-sm" style="flex: 1; padding: 0.6rem; font-size: 0.82rem; border-radius: 8px; transition: all 0.2s; background: transparent; color: var(--text-secondary); border: 1px solid var(--border-color);" onclick="setMessageType('poll')">
+                            <i class="fas fa-poll"></i> Poll Message
+                        </button>
                     </div>
-                    <textarea id="schedule-message" oninput="document.getElementById('schedule-message-length').textContent = this.value.length + ' chars'" data-i18n-placeholder="defaultMsgPlaceholder" placeholder="Type the message to broadcast daily..." style="height: 85px; width: 100%; padding: 0.75rem; background: rgba(0, 0, 0, 0.3); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-primary); outline: none; font-family: inherit; font-size: 0.85rem; resize: vertical; box-sizing: border-box;"></textarea>
+                    <input type="hidden" id="schedule-message-type" value="text">
+
+                    <!-- Text Message Section (shown when type=text) -->
+                    <div id="schedule-text-section">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                            <label for="schedule-message" style="font-weight: 500; font-size: 0.85rem; color: var(--text-primary); display: flex; align-items: center; gap: 0.4rem;" data-i18n="defaultMsgLabel">
+                                <i class="fas fa-paper-plane" style="color: #10b981;"></i> Broadcast Message
+                            </label>
+                            <span id="schedule-message-length" style="font-size: 0.72rem; color: var(--text-secondary);">0 chars</span>
+                        </div>
+                        <textarea id="schedule-message" oninput="document.getElementById('schedule-message-length').textContent = this.value.length + ' chars'" data-i18n-placeholder="defaultMsgPlaceholder" placeholder="Type the message to broadcast daily..." style="height: 85px; width: 100%; padding: 0.75rem; background: rgba(0, 0, 0, 0.3); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-primary); outline: none; font-family: inherit; font-size: 0.85rem; resize: vertical; box-sizing: border-box;"></textarea>
+                    </div>
+
+                    <!-- Poll Message Section (hidden when type=text) -->
+                    <div id="schedule-poll-section" style="display: none;">
+                        <div style="margin-bottom: 0.75rem;">
+                            <label for="schedule-poll-question" style="font-weight: 500; font-size: 0.85rem; color: var(--text-primary); display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.4rem;">
+                                <i class="fas fa-question-circle" style="color: #f59e0b;"></i> Poll Question
+                            </label>
+                            <input type="text" id="schedule-poll-question" placeholder="e.g. How is your day going?" style="width: 100%; padding: 0.75rem 1rem; background: rgba(0, 0, 0, 0.3); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-primary); outline: none; box-sizing: border-box;">
+                        </div>
+
+                        <label style="font-weight: 500; font-size: 0.85rem; color: var(--text-primary); display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.5rem;">
+                            <i class="fas fa-list-ol" style="color: #3b82f6;"></i> Poll Options
+                            <span style="font-size: 0.72rem; color: var(--text-secondary); font-weight: 400;">(min 2, max 12)</span>
+                        </label>
+                        <div id="schedule-poll-options-container" style="display: flex; flex-direction: column; gap: 0.4rem; margin-bottom: 0.6rem;">
+                            <!-- Dynamic poll option rows -->
+                        </div>
+                        <button class="btn btn-secondary btn-sm" type="button" style="width: 100%; font-size: 0.8rem; padding: 0.5rem;" onclick="addPollOptionRow()">
+                            <i class="fas fa-plus"></i> Add Poll Option
+                        </button>
+                    </div>
                 </div>
 
                 <!-- Time & Timezone Grid -->

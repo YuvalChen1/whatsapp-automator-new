@@ -1,8 +1,8 @@
-console.log('=== APP VERSION 2.5.0 (check both original + resolved JID) ===');
+console.log('=== APP VERSION 2.6.0 (Poll support + chatbot reliability) ===');
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
-const { Client, LocalAuth } = require('whatsapp-web.js');
+const { Client, LocalAuth, Poll } = require('whatsapp-web.js');
 const qrcode = require('qrcode');
 const qrcodeTerminal = require('qrcode-terminal');
 const cron = require('node-cron');
@@ -103,6 +103,22 @@ let lastQrCodeData = null;
 let activeAutomation = null; // Stores running automation state
 let shouldStopAutomation = false;
 let activeCronJobs = new Map();
+
+// === POLL TRACKING ===
+// Maps serialized poll message ID -> { scheduleId, scheduleName, chatbotMode, chatbotId, chatbotRules, contacts, sentAt }
+const sentPollMap = new Map();
+const POLL_MAP_EXPIRY_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+function cleanExpiredPolls() {
+    const now = Date.now();
+    for (const [key, val] of sentPollMap) {
+        if (now - val.sentAt > POLL_MAP_EXPIRY_MS) {
+            sentPollMap.delete(key);
+        }
+    }
+}
+// Clean expired polls every hour
+setInterval(cleanExpiredPolls, 60 * 60 * 1000);
 
 // === IN-MEMORY DEBUG LOG (viewable from browser via /api/debug-log) ===
 const debugLogEntries = [];
@@ -1018,6 +1034,127 @@ async function initializeWhatsAppClient(cleanAuthCache = false) {
     client.on('message_create', (msg) => {
         debugLog('MSG_CREATE', `Event 'message_create' fired. from=${msg.from}, body="${msg.body}", fromMe=${msg.fromMe}`);
         handleIncomingMessage(msg, 'MSG_CREATE');
+    });
+
+    // === POLL VOTE EVENT LISTENER ===
+    client.on('poll_vote', async (vote) => {
+        try {
+            debugLog('POLL_VOTE', `Poll vote received! voter=${vote.voter}, selectedOptions=${JSON.stringify(vote.selectedOptions)}`);
+
+            // Get the parent poll message ID
+            const parentMsgKey = vote.parentMessage ? vote.parentMessage.id._serialized : null;
+            if (!parentMsgKey) {
+                debugLog('POLL_VOTE', 'Could not get parent message key, skipping.');
+                return;
+            }
+
+            const pollInfo = sentPollMap.get(parentMsgKey);
+            if (!pollInfo) {
+                debugLog('POLL_VOTE', `No matching schedule found for poll message ${parentMsgKey}. May be expired or external poll.`);
+                return;
+            }
+
+            if (!vote.selectedOptions || vote.selectedOptions.length === 0) {
+                debugLog('POLL_VOTE', 'Voter cleared their selection, skipping.');
+                return;
+            }
+
+            // Get the selected option name
+            const selectedOptionName = vote.selectedOptions[0].name;
+            debugLog('POLL_VOTE', `Selected option: "${selectedOptionName}" from schedule "${pollInfo.scheduleName}"`);
+
+            // Find the trigger value for this option
+            let triggerValue = selectedOptionName; // Default: use the option label as trigger
+            if (pollInfo.pollOptions && Array.isArray(pollInfo.pollOptions)) {
+                const matchedOption = pollInfo.pollOptions.find(o => o.label === selectedOptionName);
+                if (matchedOption && matchedOption.triggerValue) {
+                    triggerValue = matchedOption.triggerValue;
+                }
+            }
+            debugLog('POLL_VOTE', `Trigger value resolved to: "${triggerValue}"`);
+
+            // Resolve voter identity
+            const voterJid = vote.voter;
+            const voterPhone = voterJid.split('@')[0];
+            let voterName = voterPhone;
+
+            try {
+                const contact = await client.getContactById(voterJid);
+                if (contact && contact.name) {
+                    voterName = contact.name;
+                } else if (contact && contact.pushname) {
+                    voterName = contact.pushname;
+                }
+            } catch (err) {
+                debugLog('POLL_VOTE', `Failed to get voter contact info: ${err.message}`);
+            }
+
+            // Log the vote to the daily report as a reply
+            logReply(voterPhone, voterName, `[Poll Vote] ${selectedOptionName}`);
+            debugLog('POLL_VOTE', `Logged poll vote from ${voterName} (${voterPhone}): "${selectedOptionName}"`);
+
+            // Emit log to frontend
+            io.emit('automation_log', {
+                message: `📊 Poll vote from ${voterName}: "${selectedOptionName}" (Schedule: ${pollInfo.scheduleName})`,
+                type: 'info'
+            });
+
+            // === Trigger chatbot rules based on the vote ===
+            let rulesToEvaluate = [];
+
+            if (pollInfo.chatbotMode === 'custom' && pollInfo.chatbotRules) {
+                rulesToEvaluate = pollInfo.chatbotRules;
+            } else if (pollInfo.chatbotMode === 'existing' && pollInfo.chatbotId) {
+                const targetBot = (chatbotConfig.chatbots || []).find(b => b.id === pollInfo.chatbotId);
+                if (targetBot && targetBot.enabled !== false && Array.isArray(targetBot.rules)) {
+                    rulesToEvaluate = targetBot.rules;
+                }
+            }
+
+            // Also try global default chatbot if no schedule-specific rules
+            if (rulesToEvaluate.length === 0 && chatbotConfig && Array.isArray(chatbotConfig.chatbots)) {
+                const defaultBot = chatbotConfig.chatbots.find(b => b.isDefault && b.enabled !== false) ||
+                                   chatbotConfig.chatbots.find(b => b.enabled !== false);
+                if (defaultBot && Array.isArray(defaultBot.rules)) {
+                    rulesToEvaluate = defaultBot.rules;
+                }
+            }
+
+            if (rulesToEvaluate.length > 0) {
+                debugLog('POLL_VOTE', `Checking ${rulesToEvaluate.length} chatbot rules against triggerValue="${triggerValue}"`);
+
+                for (const rule of rulesToEvaluate) {
+                    if (!rule.trigger || !rule.reply) continue;
+                    const matched = isTriggerMatch(rule.trigger, triggerValue);
+                    debugLog('POLL_VOTE', ` -> Rule trigger="${rule.trigger}" vs value="${triggerValue}" => matched=${matched}`);
+
+                    if (matched) {
+                        debugLog('POLL_VOTE', `POLL CHATBOT MATCHED! Sending reply to ${voterJid}: "${rule.reply}"`);
+                        try {
+                            await client.sendMessage(voterJid, rule.reply);
+                            debugLog('POLL_VOTE', `Poll auto-reply sent successfully!`);
+                            io.emit('automation_log', {
+                                message: `🤖 [Poll Chatbot: ${pollInfo.scheduleName}] Auto-replied to ${voterName} (Voted: "${selectedOptionName}") -> "${rule.reply}"`,
+                                type: 'success'
+                            });
+                        } catch (err) {
+                            debugLog('POLL_VOTE', `FAILED to send poll auto-reply: ${err.message}`);
+                            io.emit('automation_log', {
+                                message: `⚠️ Failed to send poll auto-reply to ${voterName}: ${err.message}`,
+                                type: 'error'
+                            });
+                        }
+                        break; // Only send one reply per vote
+                    }
+                }
+            } else {
+                debugLog('POLL_VOTE', `No chatbot rules found for schedule "${pollInfo.scheduleName}".`);
+            }
+
+        } catch (err) {
+            console.error('Error processing poll_vote:', err.message);
+            debugLog('POLL_VOTE', `Error: ${err.message}`);
+        }
     });
 
     await client.initialize().catch(err => {
@@ -1966,7 +2103,7 @@ const automationQueue = [];
 let isAutomationRunning = false;
 
 // Function to run the automation loop
-async function runAutomation(contacts, messageBody = null, minDelay = 6, maxDelay = 12, isScheduled = false, scheduleName = '') {
+async function runAutomation(contacts, messageBody = null, minDelay = 6, maxDelay = 12, isScheduled = false, scheduleName = '', pollConfig = null) {
     if (!whatsappClientReady) {
         const errMsg = 'Automation failed to trigger: WhatsApp client is offline.';
         console.error(errMsg);
@@ -1978,13 +2115,14 @@ async function runAutomation(contacts, messageBody = null, minDelay = 6, maxDela
         const queueMsg = `⏰ Schedule ${scheduleName ? '"' + scheduleName + '" ' : ''}queued. Will start automatically after current process finishes.`;
         console.log(queueMsg);
         io.emit('automation_log', { message: queueMsg, type: 'info' });
-        automationQueue.push({ contacts, messageBody, minDelay, maxDelay, isScheduled, scheduleName });
+        automationQueue.push({ contacts, messageBody, minDelay, maxDelay, isScheduled, scheduleName, pollConfig });
         return;
     }
 
     isAutomationRunning = true;
     try {
-        console.log(`Starting ${isScheduled ? 'scheduled' : 'manual'} automation for ${contacts.length} contacts (${scheduleName || 'Manual'})...`);
+        const isPoll = pollConfig && pollConfig.question && pollConfig.options && pollConfig.options.length >= 2;
+        console.log(`Starting ${isScheduled ? 'scheduled' : 'manual'} automation for ${contacts.length} contacts (${scheduleName || 'Manual'})${isPoll ? ' [POLL MODE]' : ''}...`);
         io.emit('automation_start', contacts.length);
         
         activeAutomation = {
@@ -1996,6 +2134,14 @@ async function runAutomation(contacts, messageBody = null, minDelay = 6, maxDela
         shouldStopAutomation = false;
 
         const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+        // If poll mode, create the Poll object
+        let pollObject = null;
+        if (isPoll) {
+            const optionLabels = pollConfig.options.map(o => o.label || o);
+            pollObject = new Poll(pollConfig.question, optionLabels, { allowMultipleAnswers: false });
+            debugLog('AUTOMATION', `Created Poll: "${pollConfig.question}" with options: [${optionLabels.join(', ')}]`);
+        }
 
         for (let i = 0; i < contacts.length; i++) {
             if (shouldStopAutomation) {
@@ -2024,7 +2170,7 @@ async function runAutomation(contacts, messageBody = null, minDelay = 6, maxDela
                 logPhone = cleanPhone;
             }
 
-            io.emit('automation_log', { message: `[${i + 1}/${contacts.length}] Sending to ${name} (${logPhone})...`, type: 'info' });
+            io.emit('automation_log', { message: `[${i + 1}/${contacts.length}] ${isPoll ? '📊 Sending poll' : 'Sending'} to ${name} (${logPhone})...`, type: 'info' });
             activeAutomation.current++;
 
             try {
@@ -2039,13 +2185,37 @@ async function runAutomation(contacts, messageBody = null, minDelay = 6, maxDela
                 }
 
                 if (canSend) {
-                    const sentMsg = await client.sendMessage(whatsappId, message);
-                    activeAutomation.sent++;
-                    io.emit('automation_log', { message: `Success: Message sent to ${name}.`, type: 'success' });
+                    let sentMsg;
+                    if (isPoll && pollObject) {
+                        // Send poll
+                        sentMsg = await client.sendMessage(whatsappId, pollObject);
+                        activeAutomation.sent++;
+                        io.emit('automation_log', { message: `Success: Poll sent to ${name}.`, type: 'success' });
+
+                        // Track this poll message for vote detection
+                        if (sentMsg && sentMsg.id && sentMsg.id._serialized) {
+                            sentPollMap.set(sentMsg.id._serialized, {
+                                scheduleId: pollConfig.scheduleId || null,
+                                scheduleName: scheduleName,
+                                chatbotMode: pollConfig.chatbotMode || null,
+                                chatbotId: pollConfig.chatbotId || null,
+                                chatbotRules: pollConfig.chatbotRules || null,
+                                pollOptions: pollConfig.options || [],
+                                sentAt: Date.now()
+                            });
+                            debugLog('AUTOMATION', `Tracked poll message ${sentMsg.id._serialized} for schedule "${scheduleName}"`);
+                        }
+                    } else {
+                        // Send regular text message
+                        sentMsg = await client.sendMessage(whatsappId, message);
+                        activeAutomation.sent++;
+                        io.emit('automation_log', { message: `Success: Message sent to ${name}.`, type: 'success' });
+                    }
+
                     recordTargetedContact(whatsappId);
                     
                     if (sentMsg && sentMsg.to) {
-                        debugLog('AUTOMATION', `Sent message to ${whatsappId}, recipient LID: ${sentMsg.to}`);
+                        debugLog('AUTOMATION', `Sent ${isPoll ? 'poll' : 'message'} to ${whatsappId}, recipient LID: ${sentMsg.to}`);
                         recordTargetedContact(sentMsg.to);
                     }
                 }
@@ -2081,7 +2251,7 @@ async function runAutomation(contacts, messageBody = null, minDelay = 6, maxDela
             console.log(`Processing queued automation schedule: "${nextJob.scheduleName}" (${automationQueue.length} remaining in queue)...`);
             io.emit('automation_log', { message: `⏰ Starting queued schedule "${nextJob.scheduleName}" (${automationQueue.length} remaining in queue)...`, type: 'system' });
             setTimeout(() => {
-                runAutomation(nextJob.contacts, nextJob.messageBody, nextJob.minDelay, nextJob.maxDelay, nextJob.isScheduled, nextJob.scheduleName);
+                runAutomation(nextJob.contacts, nextJob.messageBody, nextJob.minDelay, nextJob.maxDelay, nextJob.isScheduled, nextJob.scheduleName, nextJob.pollConfig);
             }, 1000);
         }
     }
@@ -2135,7 +2305,21 @@ function applySchedule() {
                 if (schedule.contacts && schedule.contacts.length > 0) {
                     const activeContacts = schedule.contacts.filter(c => !c.paused);
                     if (activeContacts.length > 0) {
-                        runAutomation(activeContacts, schedule.message, 6, 12, true, schedule.name || 'Unnamed');
+                        // Build pollConfig if schedule is in poll mode
+                        let pollConfig = null;
+                        if (schedule.messageType === 'poll' && schedule.pollQuestion && schedule.pollOptions && schedule.pollOptions.length >= 2) {
+                            pollConfig = {
+                                question: schedule.pollQuestion,
+                                options: schedule.pollOptions, // Array of { label, triggerValue }
+                                scheduleId: schedule.id,
+                                chatbotMode: schedule.chatbotMode || null,
+                                chatbotId: schedule.chatbotId || null,
+                                chatbotRules: schedule.chatbotRules || null
+                            };
+                            debugLog('SCHEDULE', `Poll mode for "${schedule.name}": Q="${schedule.pollQuestion}", Options=${JSON.stringify(schedule.pollOptions)}`);
+                        }
+
+                        runAutomation(activeContacts, schedule.message, 6, 12, true, schedule.name || 'Unnamed', pollConfig);
                     } else {
                         io.emit('automation_log', { message: `⏰ Schedule "${schedule.name || 'Unnamed'}" triggered, but all contacts are currently paused!`, type: 'system' });
                     }
