@@ -1042,9 +1042,16 @@ async function initializeWhatsAppClient(cleanAuthCache = false) {
     // === POLL VOTE EVENT LISTENER ===
     client.on('vote_update', async (vote) => {
         try {
-            debugLog('POLL_VOTE', `Poll vote received! voter=${vote.voter || 'unknown'}, voteObj=${JSON.stringify(vote)}`);
+            // Safe debug log (vote object may contain complex nested objects)
+            try {
+                debugLog('POLL_VOTE', `Poll vote received! Keys: ${Object.keys(vote || {}).join(', ')}`);
+                if (vote.voter) debugLog('POLL_VOTE', `voter type=${typeof vote.voter}, value=${typeof vote.voter === 'string' ? vote.voter : (vote.voter._serialized || vote.voter.user || JSON.stringify(vote.voter))}`);
+                if (vote.selectedOptions) debugLog('POLL_VOTE', `selectedOptions=${JSON.stringify(vote.selectedOptions)}`);
+            } catch (logErr) {
+                debugLog('POLL_VOTE', `(debug log error: ${logErr.message})`);
+            }
 
-            // 1. Safely extract the selected option name from vote object
+            // 1. Safely extract the selected option name
             let selectedOptionName = '';
             if (vote.selectedOptions && Array.isArray(vote.selectedOptions) && vote.selectedOptions.length > 0) {
                 const firstOpt = vote.selectedOptions[0];
@@ -1057,9 +1064,19 @@ async function initializeWhatsAppClient(cleanAuthCache = false) {
                 debugLog('POLL_VOTE', 'No selected option name could be extracted from vote, skipping.');
                 return;
             }
+            debugLog('POLL_VOTE', `Selected option name: "${selectedOptionName}"`);
 
-            // 2. Resolve voter phone and display name
-            const voterJid = vote.voter || '';
+            // 2. Resolve voter JID (vote.voter is a WID object with ._serialized, NOT a plain string)
+            let voterJid = '';
+            if (vote.voter) {
+                if (typeof vote.voter === 'string') {
+                    voterJid = vote.voter;
+                } else if (vote.voter._serialized) {
+                    voterJid = vote.voter._serialized;
+                } else if (vote.voter.user) {
+                    voterJid = vote.voter.user + '@c.us';
+                }
+            }
             const voterPhone = voterJid ? voterJid.split('@')[0] : 'Unknown';
             let voterName = voterPhone;
 
@@ -1075,8 +1092,9 @@ async function initializeWhatsAppClient(cleanAuthCache = false) {
                     debugLog('POLL_VOTE', `Failed to get voter contact info: ${err.message}`);
                 }
             }
+            debugLog('POLL_VOTE', `Voter resolved: ${voterName} (${voterPhone})`);
 
-            // 3. Collect all possible parent poll message keys for schedule lookup
+            // 3. Look up parent poll in sentPollMap
             const parentKeys = [];
             if (vote.parentMessage && vote.parentMessage.id) {
                 if (vote.parentMessage.id._serialized) parentKeys.push(vote.parentMessage.id._serialized);
@@ -1089,28 +1107,26 @@ async function initializeWhatsAppClient(cleanAuthCache = false) {
                     if (vote.parentMsgKey.id) parentKeys.push(vote.parentMsgKey.id);
                 }
             }
-            if (vote.pollCreationMessageKey) {
-                if (typeof vote.pollCreationMessageKey === 'string') parentKeys.push(vote.pollCreationMessageKey);
-                else {
-                    if (vote.pollCreationMessageKey._serialized) parentKeys.push(vote.pollCreationMessageKey._serialized);
-                    if (vote.pollCreationMessageKey.id) parentKeys.push(vote.pollCreationMessageKey.id);
-                }
-            }
+
+            debugLog('POLL_VOTE', `Parent keys to search: [${parentKeys.join(', ')}], sentPollMap size: ${sentPollMap.size}`);
 
             let pollInfo = null;
             for (const key of parentKeys) {
                 if (sentPollMap.has(key)) {
                     pollInfo = sentPollMap.get(key);
+                    debugLog('POLL_VOTE', `Found pollInfo via key: ${key}`);
                     break;
                 }
+                // Try swapping true_/false_ prefix
                 const swapped = key.startsWith('true_') ? key.replace('true_', 'false_') : (key.startsWith('false_') ? key.replace('false_', 'true_') : null);
                 if (swapped && sentPollMap.has(swapped)) {
                     pollInfo = sentPollMap.get(swapped);
+                    debugLog('POLL_VOTE', `Found pollInfo via swapped key: ${swapped}`);
                     break;
                 }
             }
 
-            // Determine triggerValue if pollInfo exists
+            // Resolve triggerValue from pollInfo options
             let triggerValue = selectedOptionName;
             if (pollInfo && pollInfo.pollOptions && Array.isArray(pollInfo.pollOptions)) {
                 const matchedOption = pollInfo.pollOptions.find(o => o.label === selectedOptionName);
@@ -1119,7 +1135,7 @@ async function initializeWhatsAppClient(cleanAuthCache = false) {
                 }
             }
 
-            // 4. Format log message and ALWAYS LOG TO REPORT!
+            // 4. Format log message and ALWAYS LOG TO REPORT
             let logMsgText = `[Poll Vote] ${selectedOptionName}`;
             if (triggerValue && (triggerValue === '1' || triggerValue === '2' || triggerValue === '3')) {
                 const cleanOpt = selectedOptionName.trim();
@@ -1130,7 +1146,7 @@ async function initializeWhatsAppClient(cleanAuthCache = false) {
 
             // UNCONDITIONAL REPORT LOGGING
             logReply(voterPhone, voterName, logMsgText);
-            debugLog('POLL_VOTE', `Logged poll vote for report from ${voterName} (${voterPhone}): "${logMsgText}"`);
+            debugLog('POLL_VOTE', `✅ Logged poll vote to report: ${voterName} (${voterPhone}): "${logMsgText}"`);
 
             // Emit live log to UI
             io.emit('automation_log', {
