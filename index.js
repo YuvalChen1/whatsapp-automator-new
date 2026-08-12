@@ -407,21 +407,24 @@ function isTriggerMatch(triggerConfig, incomingBody) {
 
 function parseWorkerChoice(msgText) {
     if (!msgText) return { choice: 'Other', label: 'Other / Uncategorized' };
-    const str = msgText.trim().toLowerCase();
+    let str = msgText.trim().toLowerCase();
     
-    // Check exact match or leading number: "1", "1 - fine", "1. fine", "1, fine", "1 fine"
-    if (/^1(\s*[\-.,:]\s*|\s+|$)/i.test(str)) {
+    // Strip prefixes like [Poll Vote], [Group Chat], etc.
+    str = str.replace(/^\[(poll vote|group chat)\]\s*/i, '').trim();
+
+    // Check exact match or leading number/option: "1", "1 - fine", "(1) fine", "option 1", "choice 1"
+    if (/^(\(1\)|1|option\s*1|choice\s*1)(\s*[\-.,:]\s*|\s+|$)/i.test(str)) {
         return { choice: '1', label: 'Option 1 ("1")' };
     }
-    if (/^2(\s*[\-.,:]\s*|\s+|$)/i.test(str)) {
+    if (/^(\(2\)|2|option\s*2|choice\s*2)(\s*[\-.,:]\s*|\s+|$)/i.test(str)) {
         return { choice: '2', label: 'Option 2 ("2")' };
     }
-    if (/^3(\s*[\-.,:]\s*|\s+|$)/i.test(str)) {
+    if (/^(\(3\)|3|option\s*3|choice\s*3)(\s*[\-.,:]\s*|\s+|$)/i.test(str)) {
         return { choice: '3', label: 'Option 3 ("3")' };
     }
 
     // Check if single digits 1, 2, or 3 appear as a standalone word anywhere in message
-    const tokens = str.split(/[\s,.-]+/);
+    const tokens = str.split(/[\s,.\-()]+/);
     if (tokens.includes('1')) return { choice: '1', label: 'Option 1 ("1")' };
     if (tokens.includes('2')) return { choice: '2', label: 'Option 2 ("2")' };
     if (tokens.includes('3')) return { choice: '3', label: 'Option 3 ("3")' };
@@ -1089,9 +1092,18 @@ async function initializeWhatsAppClient(cleanAuthCache = false) {
                 debugLog('POLL_VOTE', `Failed to get voter contact info: ${err.message}`);
             }
 
+            // Format log message for daily report
+            let logMsgText = `[Poll Vote] ${selectedOptionName}`;
+            if (triggerValue && (triggerValue === '1' || triggerValue === '2' || triggerValue === '3')) {
+                const cleanOpt = selectedOptionName.trim();
+                if (!cleanOpt.startsWith(triggerValue)) {
+                    logMsgText = `[Poll Vote] ${triggerValue} - ${selectedOptionName}`;
+                }
+            }
+
             // Log the vote to the daily report as a reply
-            logReply(voterPhone, voterName, `[Poll Vote] ${selectedOptionName}`);
-            debugLog('POLL_VOTE', `Logged poll vote from ${voterName} (${voterPhone}): "${selectedOptionName}"`);
+            logReply(voterPhone, voterName, logMsgText);
+            debugLog('POLL_VOTE', `Logged poll vote from ${voterName} (${voterPhone}): "${logMsgText}"`);
 
             // Emit log to frontend
             io.emit('automation_log', {
