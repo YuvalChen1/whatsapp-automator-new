@@ -1040,7 +1040,7 @@ async function initializeWhatsAppClient(cleanAuthCache = false) {
     });
 
     // === POLL VOTE EVENT LISTENER ===
-    client.on('poll_vote', async (vote) => {
+    client.on('vote_update', async (vote) => {
         try {
             debugLog('POLL_VOTE', `Poll vote received! voter=${vote.voter || 'unknown'}, voteObj=${JSON.stringify(vote)}`);
 
