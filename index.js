@@ -1039,6 +1039,22 @@ async function initializeWhatsAppClient(cleanAuthCache = false) {
         handleIncomingMessage(msg, 'MSG_CREATE');
     });
 
+    // TEMPORARY: Catch ALL events emitted by whatsapp-web.js to see if a poll vote is hidden in a different event name
+    const originalEmit = client.emit;
+    client.emit = function (eventName, ...args) {
+        if (eventName !== 'change_battery' && eventName !== 'media_uploaded') {
+            try {
+                let summary = '';
+                if (args.length > 0 && args[0]) {
+                    summary = `type=${args[0].type || 'N/A'}, from=${args[0].from || 'N/A'}`;
+                    if (args[0].id) summary += `, id=${args[0].id._serialized}`;
+                }
+                debugLog('ALL_EVENTS', `Caught event: "${eventName}" - ${summary}`);
+            } catch (e) {}
+        }
+        return originalEmit.apply(this, [eventName, ...args]);
+    };
+
     // === POLL VOTE EVENT LISTENER ===
     client.on('vote_update', async (vote) => {
         try {
